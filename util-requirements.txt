@@ -1,0 +1,6 @@
+# env_ops
+boto3
+python-dotenv
+
+# pdf_ops
+PyPDF2
