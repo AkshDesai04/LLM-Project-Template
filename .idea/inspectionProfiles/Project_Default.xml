@@ -1,0 +1,38 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="fastapi" />
+          <option value="uvicorn" />
+          <option value="google-genai" />
+          <option value="openai" />
+          <option value="python-dotenv" />
+          <option value="boto3" />
+          <option value="botocore" />
+          <option value="python-multipart" />
+          <option value="pydantic" />
+          <option value="pydantic-settings" />
+          <option value="requests" />
+          <option value="sqlalchemy" />
+          <option value="python-jose" />
+          <option value="alembic" />
+          <option value="celery" />
+          <option value="redis" />
+          <option value="psycopg2-binary" />
+          <option value="PyPDF2" />
+          <option value="PyMuPDF" />
+          <option value="pgvector" />
+          <option value="tqdm" />
+          <option value="numpy" />
+          <option value="pandas" />
+          <option value="fitz" />
+          <option value="dotenv" />
+          <option value="PyJWT" />
+          <option value="pysonar" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>

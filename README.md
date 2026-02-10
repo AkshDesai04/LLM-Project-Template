@@ -1,6 +1,6 @@
 This project is a template.
 
-# Code-Template-Samples
+# LLM-Project-Template
 
 ## Overview
 This repository serves as a modular template for building applications that integrate with Large Language Models (LLMs) like Google Gemini and OpenAI. It includes robust utilities for logging, parallel execution, environment management, and PDF processing.
