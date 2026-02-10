@@ -3,6 +3,9 @@ import time
 import threading
 import concurrent.futures
 from typing import Callable, List, Any, Optional, Union
+from utils.logger import get_logger
+
+logger = get_logger("ParallelExecutor")
 
 
 class ThreadSafeRateLimiter:
@@ -23,6 +26,7 @@ class ThreadSafeRateLimiter:
             wait_time = next_allowed - current_time
 
             if wait_time > 0:
+                logger.debug(f"Rate limiter: Waiting {wait_time:.3f}s for slot.")
                 time.sleep(wait_time)
                 # Update last_check to the time we actually execute (now + wait)
                 self.last_check = current_time + wait_time
@@ -57,8 +61,11 @@ def _worker_wrapper(
             last_exception = e
             attempts += 1
             if attempts <= max_retries:
+                logger.warning(f"Task failed (attempt {attempts}). Retrying in {retry_timer}s... Error: {e}")
                 time.sleep(retry_timer)
 
+    if last_exception:
+        logger.error(f"Task failed after {attempts} attempts. Final Error: {last_exception}")
     # Return the exception if all retries fail so the main thread knows what happened
     return last_exception
 
@@ -67,19 +74,19 @@ def calculate_worker_count(max_threads: int = 0, data_size: int = 0) -> int:
     """
     Determines the number of threads based on user rules.
     """
-    if max_threads == 0:
-        return data_size if data_size > 0 else 1
-
     cpu_count = os.cpu_count() or 1
+    
+    if max_threads == 0:
+        count = data_size if data_size > 0 else 1
+    elif max_threads == -1:
+        count = cpu_count
+    elif max_threads < -1:
+        count = cpu_count * abs(max_threads)
+    else:
+        count = max_threads
 
-    if max_threads == -1:
-        return cpu_count
-
-    if max_threads < -1:
-        # e.g., -2 means 2 * cpu_count
-        return cpu_count * abs(max_threads)
-
-    return max_threads
+    logger.info(f"Calculated worker count: {count} (Input max_threads: {max_threads}, Data size: {data_size}, CPU cores: {cpu_count})")
+    return count
 
 
 def parallel_execute(
@@ -111,7 +118,7 @@ def parallel_execute(
         List of results in the same order as the input data.
         If a task failed completely, the Exception object is at that index.
     """
-
+    logger.info(f"Starting parallel execution for {len(data)} items.")
     normalized_data = []
     for item in data:
         if isinstance(item, (list, tuple)):
@@ -123,6 +130,7 @@ def parallel_execute(
     rate_limiter = ThreadSafeRateLimiter(max_req_per_min) if max_req_per_min else None
 
     results: List[Any] = [None] * len(normalized_data)
+    start_time = time.time()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
         # Map futures to their original index to preserve order
@@ -144,9 +152,11 @@ def parallel_execute(
                 result = future.result()
                 results[index] = result
             except Exception as exc:
-                # This catches errors in the wrapper logic itself, not the target function
+                logger.error(f"Critical error in ThreadPoolExecutor worker: {exc}")
                 results[index] = exc
 
+    duration = time.time() - start_time
+    logger.info(f"Parallel execution finished in {duration:.2f}s.")
     return results
 
 # ==========================================
@@ -161,8 +171,6 @@ if __name__ == "__main__":
         return x + y
 
     # Data: List of argument tuples
-    # Note: If your function took 1 argument, you could pass [1, 2, 3] directly
-    # and parallel_execute would auto-wrap them to [(1,), (2,), (3,)].
     input_data = [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]
 
     print("Running parallel execution...")
