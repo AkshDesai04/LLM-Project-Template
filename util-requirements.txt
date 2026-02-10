@@ -1,6 +1,6 @@
 # env_ops
-boto3
-python-dotenv
+boto3==1.42.45
+python-dotenv==1.2.1
 
 # pdf_ops
-PyPDF2
+PyPDF2==3.0.1

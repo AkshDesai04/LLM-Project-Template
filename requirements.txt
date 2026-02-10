@@ -1,0 +1,24 @@
+# LLM Ops
+
+# env_ops
+boto3==1.42.45
+python-dotenv==1.2.1
+
+# pdf_ops
+PyPDF2==3.0.1
+
+
+
+### Util Ops
+
+# pydantics
+pydantic==2.12.5
+
+# gemini
+google-genai==1.62.0
+
+# openai
+openai==2.18.0
+
+# ollama
+ollama==0.6.1
