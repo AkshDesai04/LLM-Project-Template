@@ -7,7 +7,7 @@ from google.genai import types
 from google.genai.types import ThinkingLevel
 
 from utils.logger import get_logger
-from .llm_model_base import LLMModels
+from .llm_model_base import LLMModels, JudgeResult
 from ..modules.base import Base as BaseModule
 
 logger = get_logger("Gemini")
@@ -158,23 +158,29 @@ class GeminiModel(LLMModels):
             logger.error(f"Gemini response failed: {e}")
             raise
 
-    def upload_pdf(self, pdf_bytes: bytes) -> types.File:
+    def upload_media(self, file_bytes: bytes, mime_type: str) -> types.File:
+        """
+        Uploads media (PDF, Image, Audio, etc.) to Gemini.
+        Args:
+            file_bytes: The raw bytes of the file.
+            mime_type: The MIME type of the file (e.g., 'application/pdf', 'image/png').
+        """
         try:
-            logger.info("Uploading PDF to Gemini...")
-            pdf_file_obj = BytesIO(pdf_bytes)
-            pdf_file_obj.seek(0)
+            logger.info(f"Uploading {mime_type} to Gemini...")
+            file_obj = BytesIO(file_bytes)
+            file_obj.seek(0)
 
             uploaded_file = self.client.files.upload(
-                file=pdf_file_obj,
-                config=types.UploadFileConfig(mime_type="application/pdf")
+                file=file_obj,
+                config=types.UploadFileConfig(mime_type=mime_type)
             )
 
-            logger.info(f"PDF uploaded: {uploaded_file.name}")
+            logger.info(f"File uploaded: {uploaded_file.name}")
             return uploaded_file
 
         except Exception as e:
             logger.error(f"Gemini upload failed: {e}")
-            raise RuntimeError(f"Failed to upload PDF to Gemini: {e}")
+            raise RuntimeError(f"Failed to upload {mime_type} to Gemini: {e}")
 
     def embed_content(self, text: str, task_type: str = "RETRIEVAL_DOCUMENT", model="gemini-embedding-001",
                       dimensions=1536) -> List[float]:
@@ -242,6 +248,34 @@ class GeminiModel(LLMModels):
         except Exception as e:
             logger.error(f"Gemini embedding failed: {e}")
             raise
+
+    def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
+        """Evaluates a response using Gemini as a Judge."""
+        logger.info("Evaluating response with Gemini Judge...")
+
+        judge_prompt = f"""
+        You are an impartial judge evaluating the quality of an AI-generated response.
+
+        [Original Prompt]:
+        {input_prompt}
+
+        [AI Generated Response]:
+        {generated_output}
+
+        [Evaluation Rubric]:
+        {rubric if rubric else "Evaluate based on accuracy, clarity, and adherence to the prompt."}
+
+        Please provide a score from 1-10, your reasoning, and any suggestions for improvement.
+        """
+
+        # Create a temporary module instance for the judge call
+        class JudgeModule(BaseModule):
+            prompt: str = judge_prompt
+            structure: Any = JudgeResult
+            model: str = "gemini-2.0-flash"  # Use a fast, capable model for judging
+            response_mime_type: str = "application/json"
+
+        return self.model_response(JudgeModule())
 
 
 # Initializer

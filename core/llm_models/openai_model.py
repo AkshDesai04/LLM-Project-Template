@@ -1,12 +1,13 @@
 import inspect
 import time
+import base64
 from typing import Optional, List, Any, Union
 
 from openai import OpenAI
 from pydantic import BaseModel
 
 from utils.logger import get_logger
-from .llm_model_base import LLMModels
+from .llm_model_base import LLMModels, JudgeResult
 from ..modules.base import Base as BaseModule
 
 logger = get_logger("OpenAI")
@@ -26,17 +27,29 @@ class OpenAIModel(LLMModels):
             top_p = getattr(module, 'top_p', self.top_p)
             reasoning_effort = getattr(module, 'reasoning_budget', None)
 
-            messages = [{"role": "user", "content": prompt}]
+            # Construct messages based on file type (Image vs Text/PDF)
+            messages = []
 
-            if uploaded_file:
-                if isinstance(uploaded_file, str):
-                    messages[0]["content"] += f"\n\n[Attached Content]:\n{uploaded_file}"
+            # Check if uploaded_file is an image dict (from upload_media)
+            if uploaded_file and isinstance(uploaded_file, dict) and uploaded_file.get("type") == "image_url":
+                logger.info("Preparing multimodal message (Text + Image)...")
+                content_block = [
+                    {"type": "text", "text": prompt},
+                    uploaded_file
+                ]
+                messages.append({"role": "user", "content": content_block})
+            else:
+                # Handle Text Input (Standard or Extracted PDF text)
+                full_prompt = prompt
+                if uploaded_file and isinstance(uploaded_file, str):
+                    full_prompt += f"\n\n[Attached Content]:\n{uploaded_file}"
+
+                messages.append({"role": "user", "content": full_prompt})
 
             logger.info(f"Starting generation with model: {model}")
             start_time = time.time()
 
             # For models that support structured output natively (v1.40.0+)
-            # We use the beta.chat.completions.parse to get automatic Pydantic validation
             parsed_object = None
 
             kwargs = {
@@ -47,14 +60,15 @@ class OpenAIModel(LLMModels):
             }
 
             # Reasoning models (o1, o3, gpt-5, etc.) often don't support temperature or top_p.
-            # They might also require 'reasoning_effort' instead.
-            is_reasoning_model = any(
-                x in model.lower() for x in ["o1-", "o3-", "gpt-5"]) or reasoning_effort is not None
+            # strict check on model name to avoid sending invalid params to gpt-4o
+            is_reasoning_model = any(x in model.lower() for x in ["o1-", "o3-", "gpt-5"])
 
             if is_reasoning_model:
                 kwargs.pop("temperature", None)
                 kwargs.pop("top_p", None)
-                if reasoning_effort:
+
+                # Only add reasoning_effort if it is a string (low/medium/high)
+                if reasoning_effort and isinstance(reasoning_effort, str):
                     kwargs["reasoning_effort"] = reasoning_effort.lower()
 
             if structure and inspect.isclass(structure) and issubclass(structure, BaseModel):
@@ -140,17 +154,39 @@ class OpenAIModel(LLMModels):
             logger.error(f"OpenAI response failed: {e}")
             raise
 
-    def upload_pdf(self, pdf_bytes: bytes) -> str:
+    def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:
         """
-        Extracts text from PDF bytes to be used as context in the OpenAI prompt.
+        Uploads/Processes media.
+        - PDF: Extracts text locally (str).
+        - Images: Encodes to Base64 for Vision API (dict).
+        - Video: Not supported (requires frame extraction).
         """
         try:
-            logger.info("Processing PDF for OpenAI (Local Extraction)...")
-            text = self._extract_text_from_pdf_bytes(pdf_bytes)
-            return text
+            if mime_type == 'application/pdf':
+                logger.info("Processing PDF for OpenAI (Local Extraction)...")
+                return self._extract_text_from_pdf_bytes(file_bytes)
+
+            elif mime_type.startswith('image/'):
+                logger.info(f"Processing {mime_type} for OpenAI Vision...")
+                b64_str = base64.b64encode(file_bytes).decode('utf-8')
+                return {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{mime_type};base64,{b64_str}"
+                    }
+                }
+            elif mime_type.startswith('video/'):
+                logger.error("OpenAI does not support raw video upload via Chat Completions.")
+                raise NotImplementedError(
+                    "OpenAI Chat API requires video to be split into frames. Raw video upload is not supported in this wrapper.")
+            else:
+                # Fallback for plain text files
+                logger.info(f"Treating {mime_type} as plain text...")
+                return file_bytes.decode('utf-8', errors='ignore')
+
         except Exception as e:
-            logger.error(f"OpenAI PDF processing failed: {e}")
-            raise RuntimeError(f"Failed to process PDF for OpenAI: {e}")
+            logger.error(f"OpenAI media upload failed: {e}")
+            raise RuntimeError(f"Failed to process {mime_type} for OpenAI: {e}")
 
     def embed_content(self, text: Union[str, List[str]], model="text-embedding-3-small", **kwargs) -> Union[
         List[float], List[List[float]]]:
@@ -204,6 +240,34 @@ class OpenAIModel(LLMModels):
         except Exception as e:
             logger.error(f"OpenAI embedding failed: {e}")
             raise
+
+    def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
+        """Evaluates a response using OpenAI as a Judge."""
+        logger.info("Evaluating response with OpenAI Judge...")
+
+        judge_prompt = f"""
+        You are an impartial judge evaluating the quality of an AI-generated response.
+
+        [Original Prompt]:
+        {input_prompt}
+
+        [AI Generated Response]:
+        {generated_output}
+
+        [Evaluation Rubric]:
+        {rubric if rubric else "Evaluate based on accuracy, clarity, and adherence to the prompt."}
+
+        Please provide a score from 1-10, your reasoning, and any suggestions for improvement.
+        """
+
+        # Create a temporary module instance for the judge call
+        class JudgeModule(BaseModule):
+            prompt: str = judge_prompt
+            structure: Any = JudgeResult
+            model: str = "gpt-4o-mini"  # Use a cost-effective, capable model for judging
+            response_mime_type: str = "application/json"
+
+        return self.model_response(JudgeModule())
 
 
 # Initializer

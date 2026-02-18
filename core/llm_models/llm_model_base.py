@@ -3,6 +3,7 @@ import inspect
 import atexit
 from abc import ABC, abstractmethod
 from typing import Optional, List, Any, Union
+from pydantic import BaseModel, Field
 
 from utils.logger import get_logger
 from utils.file_ops import read_file, read_csv
@@ -10,6 +11,12 @@ from ..modules.base import Base as BaseModule
 from utils.pdf_ops import extract_text_from_bytes
 
 logger = get_logger("LLM_Base")
+
+
+class JudgeResult(BaseModel):
+    score: int = Field(..., description="A score from 1 to 10 evaluating the response quality.")
+    reasoning: str = Field(..., description="Detailed explanation for the assigned score.")
+    improvements: Optional[str] = Field(None, description="Suggestions for improving the response.")
 
 
 def load_pricing(csv_path: str) -> dict:
@@ -192,11 +199,16 @@ class LLMModels(ABC):
         pass
 
     @abstractmethod
-    def upload_pdf(self, pdf_bytes: bytes) -> Any:
+    def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:
         pass
 
     @abstractmethod
     def embed_content(self, input_content: Union[str, List[str]], **kwargs) -> Union[List[float], List[List[float]]]:
+        pass
+
+    @abstractmethod
+    def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
+        """Evaluates a model's response using the LLM-as-a-Judge pattern."""
         pass
 
     def _extract_text_from_pdf_bytes(self, pdf_bytes: bytes) -> str:
