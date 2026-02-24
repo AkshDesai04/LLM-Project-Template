@@ -5,7 +5,7 @@ from utils.file_ops import read_prompt
 
 
 class Base(BaseModel):
-    prompt: str = read_prompt("prompt")
+    prompt: Optional[str] = None
 
     structure: Optional[Any] = None
     model: str = "gemini-2.5-pro"

@@ -1,8 +1,10 @@
 import inspect
 import time
 import base64
+from io import BytesIO
 from typing import Optional, List, Any, Union
 
+import PyPDF2
 from openai import OpenAI
 from pydantic import BaseModel
 
@@ -29,20 +31,35 @@ class OpenAIModel(LLMModels):
 
             # Construct messages based on file type (Image vs Text/PDF)
             messages = []
+            
+            # Normalize uploaded_file to a list
+            files = []
+            if uploaded_file:
+                if isinstance(uploaded_file, list):
+                    files = uploaded_file
+                else:
+                    files = [uploaded_file]
 
-            # Check if uploaded_file is an image dict (from upload_media)
-            if uploaded_file and isinstance(uploaded_file, dict) and uploaded_file.get("type") == "image_url":
-                logger.info("Preparing multimodal message (Text + Image)...")
-                content_block = [
-                    {"type": "text", "text": prompt},
-                    uploaded_file
-                ]
+            # Separate images and text content
+            image_contents = [f for f in files if isinstance(f, dict) and f.get("type") == "image_url"]
+            text_contents = [f for f in files if isinstance(f, str)]
+
+            if image_contents:
+                logger.info(f"Preparing multimodal message (Text + {len(image_contents)} Image(s))...")
+                content_block = [{"type": "text", "text": prompt}]
+                content_block.extend(image_contents)
+                
+                # If there's also text content from PDFs/Files, append it to the prompt text or as a separate block
+                if text_contents:
+                    extra_text = "\n\n" + "\n\n".join([f"[Attached Content]:\n{t}" for t in text_contents])
+                    content_block[0]["text"] += extra_text
+                
                 messages.append({"role": "user", "content": content_block})
             else:
                 # Handle Text Input (Standard or Extracted PDF text)
                 full_prompt = prompt
-                if uploaded_file and isinstance(uploaded_file, str):
-                    full_prompt += f"\n\n[Attached Content]:\n{uploaded_file}"
+                if text_contents:
+                    full_prompt += "\n\n" + "\n\n".join([f"[Attached Content]:\n{t}" for t in text_contents])
 
                 messages.append({"role": "user", "content": full_prompt})
 
@@ -59,8 +76,7 @@ class OpenAIModel(LLMModels):
                 "top_p": top_p,
             }
 
-            # Reasoning models (o1, o3, gpt-5, etc.) often don't support temperature or top_p.
-            # strict check on model name to avoid sending invalid params to gpt-4o
+            # Reasoning models (o1, o3, etc.) often don't support temperature or top_p.
             is_reasoning_model = any(x in model.lower() for x in ["o1-", "o3-", "gpt-5"])
 
             if is_reasoning_model:
@@ -187,6 +203,18 @@ class OpenAIModel(LLMModels):
         except Exception as e:
             logger.error(f"OpenAI media upload failed: {e}")
             raise RuntimeError(f"Failed to process {mime_type} for OpenAI: {e}")
+
+    def _extract_text_from_pdf_bytes(self, pdf_bytes: bytes) -> str:
+        """Helper to extract text from PDF bytes using PyPDF2."""
+        try:
+            reader = PyPDF2.PdfReader(BytesIO(pdf_bytes))
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
+            return text.strip()
+        except Exception as e:
+            logger.error(f"PDF extraction failed: {e}")
+            return f"[Error extracting text from PDF: {e}]"
 
     def embed_content(self, text: Union[str, List[str]], model="text-embedding-3-small", **kwargs) -> Union[
         List[float], List[List[float]]]:

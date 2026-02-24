@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from utils.logger import get_logger
 from utils.file_ops import read_file, read_csv
 from ..modules.base import Base as BaseModule
-from utils.pdf_ops import extract_text_from_bytes
 
 logger = get_logger("LLM_Base")
 
@@ -210,14 +209,3 @@ class LLMModels(ABC):
     def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
         """Evaluates a model's response using the LLM-as-a-Judge pattern."""
         pass
-
-    def _extract_text_from_pdf_bytes(self, pdf_bytes: bytes) -> str:
-        """Shared Utility Wrapper using utils/pdf_operations"""
-        print("[Model]: Processing PDF text locally...")
-        try:
-            text = extract_text_from_bytes(pdf_bytes)
-            print("[Model]: PDF text extraction successful.")
-            return text
-        except Exception as e:
-            logger.error(f"Failed to extract text from PDF: {e}")
-            raise

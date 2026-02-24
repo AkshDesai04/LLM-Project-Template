@@ -19,13 +19,15 @@ def get_local_secret(key_name: str) -> str:
     return value
 
 
-def get_aws_secret(key_name: str, secret_name: str = "RFP-New", region_name: str = "us-east-1"):
-    logger.info(f"Retrieving AWS secret: {key_name} from {secret_name} in {region_name}")
+def get_aws_secret(key_name: str, secret_name: str):
     session = boto3.session.Session()
 
     # helper to safely get creds
     aws_access = get_local_secret("AWS_ACCESS_KEY_ID")
     aws_secret = get_local_secret("AWS_SECRET_ACCESS_KEY")
+    region_name = get_local_secret("AWS_REGION")
+
+    logger.info(f"Retrieving AWS secret: {key_name} from {secret_name} in {region_name}")
 
     if not aws_access or not aws_secret:
         logger.error("AWS Credentials not found in environment. Check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.")

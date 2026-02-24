@@ -39,7 +39,10 @@ class GeminiModel(LLMModels):
             # Prepare content list
             contents: List[Any] = [prompt]
             if uploaded_file:
-                contents.append(uploaded_file)
+                if isinstance(uploaded_file, list):
+                    contents.extend(uploaded_file)
+                else:
+                    contents.append(uploaded_file)
 
             # Configure thinking/reasoning
             thinking_config_obj = None
@@ -175,7 +178,16 @@ class GeminiModel(LLMModels):
                 config=types.UploadFileConfig(mime_type=mime_type)
             )
 
-            logger.info(f"File uploaded: {uploaded_file.name}")
+            # Wait for the file to be processed if it's not immediately ACTIVE
+            while uploaded_file.state.name == "PROCESSING":
+                logger.info(f"File {uploaded_file.name} is still processing...")
+                time.sleep(2)
+                uploaded_file = self.client.files.get(name=uploaded_file.name)
+
+            if uploaded_file.state.name == "FAILED":
+                raise RuntimeError(f"File {uploaded_file.name} failed to process.")
+
+            logger.info(f"File uploaded and active: {uploaded_file.name}")
             return uploaded_file
 
         except Exception as e:
