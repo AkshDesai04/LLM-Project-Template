@@ -9,6 +9,7 @@ class Base(BaseModel):
 
     structure: Optional[Any] = None
     model: str = "gemini-2.5-pro"
+    fall_back_models: list[str] = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
     top_p: float = 0.8
     top_k: int = 40

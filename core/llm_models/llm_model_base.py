@@ -24,10 +24,28 @@ def load_pricing(csv_path: str) -> dict:
     try:
         rows = read_csv(csv_path)
         for row in rows:
-            pricing[row['model_name']] = {
-                "input": float(row['input_cost_per_1m']),
-                "output": float(row['output_cost_per_1m']),
-                "cached": float(row['cached_cost_per_1m'])
+            if not row.get('sr', '').isdigit():
+                continue
+
+            model_id = row.get('model_id')
+            if not model_id:
+                continue
+
+            def to_float(value_str: Optional[str]) -> float:
+                """Safely convert a string to float, handling None and 'N/A'."""
+                if not value_str or value_str.strip().upper() == 'N/A':
+                    return 0.0
+                try:
+                    return float(value_str)
+                except (ValueError, TypeError):
+                    return 0.0
+
+            pricing[model_id] = {
+                "input": to_float(row.get('input_cost_per_million')),
+                "output": to_float(row.get('output_cost_per_million')),
+                "cached": to_float(row.get('context_caching_cost_per_million')),
+                "input_above_200k": to_float(row.get('input_cost_per_million_above_200k')),
+                "output_above_200k": to_float(row.get('output_cost_per_million_above_200k')),
             }
     except Exception as e:
         logger.error(f"Failed to load pricing from {csv_path}: {e}")
@@ -141,7 +159,7 @@ class LLMModels(ABC):
         LLMModels._total_overall_cost += costs["total_cost"]
 
     def _calculate_cost(self, model_name: str, prompt_tokens: int, output_tokens: int, cached_tokens: int = 0) -> dict:
-        """Calculates estimated cost based on token counts."""
+        """Calculates estimated cost based on token counts, including tiered pricing."""
         # Exact match first
         rates = PRICING.get(model_name)
 
@@ -153,23 +171,52 @@ class LLMModels(ABC):
                     break
 
         if not rates:
-            return {
-                "input_cost": 0.0,
-                "output_cost": 0.0,
-                "cached_cost": 0.0,
-                "total_cost": 0.0
-            }
+            logger.warning(f"No pricing information found for model '{model_name}'. Costs will be zero.")
+            return {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
 
-        input_cost = (prompt_tokens / 1_000_000) * rates["input"]
-        output_cost = (output_tokens / 1_000_000) * rates["output"]
-        cached_cost = (cached_tokens / 1_000_000) * rates["cached"]
+        # Tiered pricing threshold
+        TIER_THRESHOLD = 200_000
+
+        # --- Input Cost Calculation ---
+        input_cost = 0.0
+        if prompt_tokens > 0:
+            rate_input = rates.get("input", 0.0)
+            rate_input_above = rates.get("input_above_200k", 0.0)
+
+            if rate_input_above > 0 and prompt_tokens > TIER_THRESHOLD:
+                tokens_below = TIER_THRESHOLD
+                tokens_above = prompt_tokens - TIER_THRESHOLD
+                cost_below = (tokens_below / 1_000_000) * rate_input
+                cost_above = (tokens_above / 1_000_000) * rate_input_above
+                input_cost = cost_below + cost_above
+            else:
+                input_cost = (prompt_tokens / 1_000_000) * rate_input
+
+        # --- Output Cost Calculation ---
+        output_cost = 0.0
+        if output_tokens > 0:
+            rate_output = rates.get("output", 0.0)
+            rate_output_above = rates.get("output_above_200k", 0.0)
+
+            if rate_output_above > 0 and output_tokens > TIER_THRESHOLD:
+                tokens_below = TIER_THRESHOLD
+                tokens_above = output_tokens - TIER_THRESHOLD
+                cost_below = (tokens_below / 1_000_000) * rate_output
+                cost_above = (tokens_above / 1_000_000) * rate_output_above
+                output_cost = cost_below + cost_above
+            else:
+                output_cost = (output_tokens / 1_000_000) * rate_output
+
+        # --- Cached Cost Calculation ---
+        cached_cost = (cached_tokens / 1_000_000) * rates.get("cached", 0.0)
+
         total_cost = input_cost + output_cost + cached_cost
 
         return {
             "input_cost": input_cost,
             "output_cost": output_cost,
             "cached_cost": cached_cost,
-            "total_cost": total_cost
+            "total_cost": total_cost,
         }
 
     @staticmethod
