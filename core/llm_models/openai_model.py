@@ -21,154 +21,122 @@ class OpenAIModel(LLMModels):
         self.client = OpenAI(api_key=api_key)
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None) -> Any:
-        try:
-            prompt = module.prompt
-            structure = module.structure
-            model = module.model or self.model_name
-            temperature = getattr(module, 'temperature', self.temperature)
-            top_p = getattr(module, 'top_p', self.top_p)
-            reasoning_effort = getattr(module, 'reasoning_budget', None)
+        prompt = module.prompt
+        structure = module.structure
+        model = self.model_name  # Use the model set during initialization
+        temperature = getattr(module, 'temperature', self.temperature)
+        top_p = getattr(module, 'top_p', self.top_p)
+        reasoning_effort = getattr(module, 'reasoning_budget', None)
 
-            # Construct messages based on file type (Image vs Text/PDF)
-            messages = []
-            
-            # Normalize uploaded_file to a list
-            files = []
-            if uploaded_file:
-                if isinstance(uploaded_file, list):
-                    files = uploaded_file
+        # Construct messages payload once
+        messages = []
+        files = []
+        if uploaded_file:
+            files = uploaded_file if isinstance(uploaded_file, list) else [uploaded_file]
+
+        image_contents = [f for f in files if isinstance(f, dict) and f.get("type") == "image_url"]
+        text_contents = [f for f in files if isinstance(f, str)]
+
+        if image_contents:
+            logger.info(f"Preparing multimodal message (Text + {len(image_contents)} Image(s))...")
+            content_block = [{"type": "text", "text": prompt}]
+            content_block.extend(image_contents)
+            if text_contents:
+                extra_text = "\n\n" + "\n\n".join([f"[Attached Content]:\n{t}" for t in text_contents])
+                content_block[0]["text"] += extra_text
+            messages.append({"role": "user", "content": content_block})
+        else:
+            full_prompt = prompt
+            if text_contents:
+                full_prompt += "\n\n" + "\n\n".join([f"[Attached Content]:\n{t}" for t in text_contents])
+            messages.append({"role": "user", "content": full_prompt})
+
+        last_exception = None
+        max_retries = 3
+
+        logger.info(f"Attempting generation with model: {model}")
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Attempt {attempt + 1}/{max_retries} for model {model}")
+                start_time = time.time()
+
+                kwargs = {"model": model, "messages": messages, "temperature": temperature, "top_p": top_p}
+
+                is_reasoning_model = any(x in model.lower() for x in ["o1-", "o3-", "gpt-5"])
+                if is_reasoning_model:
+                    kwargs.pop("temperature", None)
+                    kwargs.pop("top_p", None)
+                    if reasoning_effort and isinstance(reasoning_effort, str):
+                        kwargs["reasoning_effort"] = reasoning_effort.lower()
+
+                parsed_object = None
+                if structure and inspect.isclass(structure) and issubclass(structure, BaseModel):
+                    response = self.client.beta.chat.completions.parse(**kwargs, response_format=structure)
+                    parsed_object = response.choices[0].message.parsed
+                    output_content = response.choices[0].message.content
                 else:
-                    files = [uploaded_file]
+                    if structure:
+                        kwargs["response_format"] = {"type": "json_object"}
+                    response = self.client.chat.completions.create(**kwargs)
+                    output_content = response.choices[0].message.content
 
-            # Separate images and text content
-            image_contents = [f for f in files if isinstance(f, dict) and f.get("type") == "image_url"]
-            text_contents = [f for f in files if isinstance(f, str)]
+                end_time = time.time()
+                total_duration = end_time - start_time
 
-            if image_contents:
-                logger.info(f"Preparing multimodal message (Text + {len(image_contents)} Image(s))...")
-                content_block = [{"type": "text", "text": prompt}]
-                content_block.extend(image_contents)
-                
-                # If there's also text content from PDFs/Files, append it to the prompt text or as a separate block
-                if text_contents:
-                    extra_text = "\n\n" + "\n\n".join([f"[Attached Content]:\n{t}" for t in text_contents])
-                    content_block[0]["text"] += extra_text
-                
-                messages.append({"role": "user", "content": content_block})
-            else:
-                # Handle Text Input (Standard or Extracted PDF text)
-                full_prompt = prompt
-                if text_contents:
-                    full_prompt += "\n\n" + "\n\n".join([f"[Attached Content]:\n{t}" for t in text_contents])
+                if not output_content and not parsed_object:
+                    raise ValueError("Received an empty response from OpenAI.")
 
-                messages.append({"role": "user", "content": full_prompt})
+                # --- Success: Log Metadata and return ---
+                usage = response.usage
+                log_msg = [
+                    "\n" + "=" * 30, "OPENAI METADATA REPORT", "=" * 30,
+                    f"Model: {model}", f"Total Wall-Clock Time: {total_duration:.4f}s"
+                ]
 
-            logger.info(f"Starting generation with model: {model}")
-            start_time = time.time()
+                if usage:
+                    prompt_tokens = getattr(usage, 'prompt_tokens', 0)
+                    completion_tokens = getattr(usage, 'completion_tokens', 0)
+                    cached_tokens = getattr(getattr(usage, 'prompt_tokens_details', None), 'cached_tokens', 0)
+                    costs = self._calculate_cost(model, prompt_tokens, completion_tokens, cached_tokens)
+                    self.record_transaction(type(module).__name__, model, costs, total_duration)
 
-            # For models that support structured output natively (v1.40.0+)
-            parsed_object = None
+                    log_msg.append(f"Cached Input Tokens: {cached_tokens}")
+                    log_msg.append(f"Cached Cost: ${costs['cached_cost']:.6f}")
+                    log_msg.append("")
+                    log_msg.append(f"Completion Token Count: {completion_tokens}")
+                    if getattr(usage, 'completion_tokens_details', None):
+                        log_msg.append(
+                            f"Reasoning/Thinking Tokens: {getattr(usage.completion_tokens_details, 'reasoning_tokens', 0)}")
+                    log_msg.append(f"Output Cost: ${costs['output_cost']:.6f}")
+                    log_msg.append("")
+                    log_msg.append(f"Prompt Tokens Count: {prompt_tokens}")
+                    log_msg.append(f"Input Cost: ${costs['input_cost']:.6f}")
+                    log_msg.append("")
+                    log_msg.append(f"Total Token Count: {getattr(usage, 'total_tokens', 0)}")
+                    log_msg.append(f"Total Estimated Cost: ${costs['total_cost']:.6f}")
 
-            kwargs = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "top_p": top_p,
-            }
+                log_msg.append("=" * 30 + "\n")
+                logger.info("\n".join(log_msg))
 
-            # Reasoning models (o1, o3, etc.) often don't support temperature or top_p.
-            is_reasoning_model = any(x in model.lower() for x in ["o1-", "o3-", "gpt-5"])
+                if usage:
+                    logger.info({
+                        "transaction_type": "generation", "model": model, "module": type(module).__name__,
+                        "costs": costs, "duration": total_duration
+                    })
 
-            if is_reasoning_model:
-                kwargs.pop("temperature", None)
-                kwargs.pop("top_p", None)
+                self.print_final_summary()
 
-                # Only add reasoning_effort if it is a string (low/medium/high)
-                if reasoning_effort and isinstance(reasoning_effort, str):
-                    kwargs["reasoning_effort"] = reasoning_effort.lower()
+                return parsed_object if parsed_object else output_content
 
-            if structure and inspect.isclass(structure) and issubclass(structure, BaseModel):
-                # Use the 'parse' method for automatic conversion to Pydantic model
-                response = self.client.beta.chat.completions.parse(
-                    **kwargs,
-                    response_format=structure
-                )
-                parsed_object = response.choices[0].message.parsed
-                output_content = response.choices[0].message.content
-            else:
-                # Standard completion
-                if structure:  # If it's just 'json' or similar but not a BaseModel class
-                    kwargs["response_format"] = {"type": "json_object"}
+            except Exception as e:
+                last_exception = e
+                logger.warning(f"OpenAI response failed on attempt {attempt + 1} for model {model}: {e}")
+                time.sleep(2)
+                continue
 
-                response = self.client.chat.completions.create(**kwargs)
-                output_content = response.choices[0].message.content
-
-            usage = response.usage
-
-            end_time = time.time()
-            total_duration = end_time - start_time
-
-            if not output_content and not parsed_object:
-                raise ValueError("Received an empty response from OpenAI.")
-
-            # --- Log Metadata ---
-            log_msg = ["\n" + "=" * 30, "OPENAI METADATA REPORT", "=" * 30, f"Model: {model}",
-                       f"Total Wall-Clock Time: {total_duration:.4f}s"]
-
-            if usage:
-                prompt_tokens = getattr(usage, 'prompt_tokens', 0)
-                completion_tokens = getattr(usage, 'completion_tokens', 0)
-
-                cached_tokens = 0
-                prompt_details = getattr(usage, 'prompt_tokens_details', None)
-                if prompt_details:
-                    cached_tokens = getattr(prompt_details, 'cached_tokens', 0)
-
-                costs = self._calculate_cost(model, prompt_tokens, completion_tokens, cached_tokens)
-                self.record_transaction(type(module).__name__, model, costs, total_duration)
-
-                log_msg.append(f"Cached Input Tokens: {cached_tokens}")
-                log_msg.append(f"Cached Cost: ${costs['cached_cost']:.6f}")
-                log_msg.append("")
-                log_msg.append(f"Completion Token Count: {completion_tokens}")
-
-                completion_details = getattr(usage, 'completion_tokens_details', None)
-                if completion_details:
-                    reasoning_tokens = getattr(completion_details, 'reasoning_tokens', 0)
-                    log_msg.append(f"Reasoning/Thinking Tokens: {reasoning_tokens}")
-
-                log_msg.append(f"Output Cost: ${costs['output_cost']:.6f}")
-                log_msg.append("")
-                log_msg.append(f"Prompt Tokens Count: {prompt_tokens}")
-                log_msg.append(f"Input Cost: ${costs['input_cost']:.6f}")
-                log_msg.append("")
-                log_msg.append(f"Total Token Count: {getattr(usage, 'total_tokens', 0)}")
-                log_msg.append(f"Total Estimated Cost: ${costs['total_cost']:.6f}")
-
-            log_msg.append("=" * 30 + "\n")
-            logger.info("\n".join(log_msg))
-
-            # Structured logging for costs
-            if usage:
-                logger.info({
-                    "transaction_type": "generation",
-                    "model": model,
-                    "module": type(module).__name__,
-                    "costs": costs,
-                    "duration": total_duration
-                })
-            # ----------------------
-
-            self.print_final_summary()
-
-            if parsed_object:
-                return parsed_object
-
-            return output_content
-
-        except Exception as e:
-            logger.error(f"OpenAI response failed: {e}")
-            raise
+        logger.error(f"All {max_retries} retries failed for model {model}.")
+        raise RuntimeError(
+            f"Failed to get response from OpenAI model {model} after {max_retries} attempts.") from last_exception
 
     def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:
         """

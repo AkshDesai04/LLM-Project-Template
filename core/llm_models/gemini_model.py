@@ -26,140 +26,135 @@ class GeminiModel(LLMModels):
         )
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None) -> Any:
-        try:
-            prompt = module.prompt
-            structure = module.structure
-            model = module.model or self.model_name
-            top_p = module.top_p
-            top_k = module.top_k
-            temperature = module.temperature
-            reasoning_budget = module.reasoning_budget
-            response_mime_type = module.response_mime_type
+        prompt = module.prompt
+        structure = module.structure
+        model = self.model_name  # Use the model set during initialization
+        top_p = module.top_p
+        top_k = module.top_k
+        temperature = module.temperature
+        reasoning_budget = module.reasoning_budget
+        response_mime_type = module.response_mime_type
 
-            # Prepare content list
-            contents: List[Any] = [prompt]
-            if uploaded_file:
-                if isinstance(uploaded_file, list):
-                    contents.extend(uploaded_file)
-                else:
-                    contents.append(uploaded_file)
+        # Prepare content list
+        contents: List[Any] = [prompt]
+        if uploaded_file:
+            if isinstance(uploaded_file, list):
+                contents.extend(uploaded_file)
+            else:
+                contents.append(uploaded_file)
 
-            # Configure thinking/reasoning
-            thinking_config_obj = None
+        last_exception = None
+        max_retries = 3
 
-            if reasoning_budget:
-                if isinstance(reasoning_budget, str):
-                    reasoning = ThinkingLevel(reasoning_budget)
+        logger.info(f"Attempting generation with model: {model}")
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Attempt {attempt + 1}/{max_retries} for model {model}")
 
-                    # If reasoning_budget is a string (e.g., "HIGH"), pass it to thinking_level
-                    thinking_config_obj = types.ThinkingConfig(
-                        include_thoughts=True,
-                        thinking_level=reasoning
-                    )
-                else:
-                    # Fallback if just True/int provided without level specification
-                    thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
+                # Configure thinking/reasoning
+                thinking_config_obj = None
+                if reasoning_budget:
+                    if isinstance(reasoning_budget, str):
+                        reasoning = ThinkingLevel(reasoning_budget)
+                        thinking_config_obj = types.ThinkingConfig(include_thoughts=True, thinking_level=reasoning)
+                    else:
+                        thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
 
-            # Build GenerateContentConfig
-            config = types.GenerateContentConfig(
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                response_mime_type=response_mime_type,
-                response_schema=structure,
-                thinking_config=thinking_config_obj,
-            )
+                # Build GenerateContentConfig
+                config = types.GenerateContentConfig(
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    response_mime_type=response_mime_type,
+                    response_schema=structure,
+                    thinking_config=thinking_config_obj,
+                )
 
-            logger.info(f"Starting generation with model: {model}")
-            start_time = time.time()
+                start_time = time.time()
 
-            response = self.client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=config,
-            )
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=config,
+                )
 
-            end_time = time.time()
-            total_duration = end_time - start_time
+                end_time = time.time()
+                total_duration = end_time - start_time
 
-            if not response.text:
-                raise ValueError("Received an empty response from Gemini.")
+                if not response.text and not getattr(response, 'parsed', None):
+                    raise ValueError("Received an empty response from Gemini.")
 
-            # --- Log Metadata ---
-            log_msg = []
-            log_msg.append("\n" + "=" * 30)
-            log_msg.append("GEMINI METADATA REPORT")
-            log_msg.append("=" * 30)
-            log_msg.append(f"Model: {model}")
-            log_msg.append(f"Total Wall-Clock Time: {total_duration:.4f}s")
+                # --- Success: Log Metadata and return ---
+                log_msg = [
+                    "\n" + "=" * 30, "GEMINI METADATA REPORT", "=" * 30,
+                    f"Model: {model}", f"Total Wall-Clock Time: {total_duration:.4f}s"
+                ]
 
-            if response.usage_metadata:
-                u = response.usage_metadata
+                if response.usage_metadata:
+                    u = response.usage_metadata
 
-                # Helper to safely get value or 0
-                def get_val(obj, attr):
-                    return getattr(obj, attr, 0) or 0
+                    def get_val(obj, attr):
+                        return getattr(obj, attr, 0) or 0
 
-                prompt_tokens = get_val(u, 'prompt_token_count')
-                candidate_tokens = get_val(u, 'candidates_token_count')
-                cached_tokens = get_val(u, 'cached_content_token_count')
+                    prompt_tokens = get_val(u, 'prompt_token_count')
+                    candidate_tokens = get_val(u, 'candidates_token_count')
+                    cached_tokens = get_val(u, 'cached_content_token_count')
 
-                costs = self._calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
-                self.record_transaction(type(module).__name__, model, costs, total_duration)
+                    costs = self._calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
+                    self.record_transaction(type(module).__name__, model, costs, total_duration)
 
-                log_msg.append(f"Cache Tokens Details: {getattr(u, 'cache_tokens_details', 'N/A')}")
-                log_msg.append(f"Cached Content Token Count: {cached_tokens}")
-                log_msg.append(f"Cached Cost: ${costs['cached_cost']:.6f}")
-                log_msg.append("")
-                log_msg.append(f"Candidates Token Count: {candidate_tokens}")
-                log_msg.append(f"Candidates Tokens Details: {getattr(u, 'candidates_tokens_details', 'N/A')}")
-                log_msg.append(f"Output Cost: ${costs['output_cost']:.6f}")
-                log_msg.append("")
-                log_msg.append(f"Prompt Tokens Count: {prompt_tokens}")
+                    log_msg.append(f"Cache Tokens Details: {getattr(u, 'cache_tokens_details', 'N/A')}")
+                    log_msg.append(f"Cached Content Token Count: {cached_tokens}")
+                    log_msg.append(f"Cached Cost: ${costs['cached_cost']:.6f}")
+                    log_msg.append("")
+                    log_msg.append(f"Candidates Token Count: {candidate_tokens}")
+                    log_msg.append(f"Candidates Tokens Details: {getattr(u, 'candidates_tokens_details', 'N/A')}")
+                    log_msg.append(f"Output Cost: ${costs['output_cost']:.6f}")
+                    log_msg.append("")
+                    log_msg.append(f"Prompt Tokens Count: {prompt_tokens}")
 
-                # Handle Prompt Token Details (Image vs Text breakdown)
-                details = getattr(u, 'prompt_tokens_details', None)
-                if details:
-                    for detail in details:
-                        modality = "UNKNOWN"
-                        if hasattr(detail, 'modality'):
-                            modality = getattr(detail.modality, 'name', str(detail.modality))
-                        log_msg.append(f"Prompt Tokens Detail: {modality}: {detail.token_count}")
+                    details = getattr(u, 'prompt_tokens_details', None)
+                    if details:
+                        for detail in details:
+                            modality = "UNKNOWN"
+                            if hasattr(detail, 'modality'):
+                                modality = getattr(detail.modality, 'name', str(detail.modality))
+                            log_msg.append(f"Prompt Tokens Detail: {modality}: {detail.token_count}")
 
-                log_msg.append(f"Input Cost: ${costs['input_cost']:.6f}")
-                log_msg.append("")
-                log_msg.append(f"Thoughts Token Count: {get_val(u, 'thoughts_token_count')}")
-                log_msg.append("")
-                log_msg.append(f"Tool Use Prompt Tokens Count: {get_val(u, 'tool_use_prompt_token_count')}")
-                log_msg.append("")
-                log_msg.append(f"Total Token Count: {get_val(u, 'total_token_count')}")
-                log_msg.append(f"Total Estimated Cost: ${costs['total_cost']:.6f}")
-                log_msg.append(f"Traffic Type: {getattr(u, 'traffic_type', 'N/A')}")
+                    log_msg.append(f"Input Cost: ${costs['input_cost']:.6f}")
+                    log_msg.append("")
+                    log_msg.append(f"Thoughts Token Count: {get_val(u, 'thoughts_token_count')}")
+                    log_msg.append("")
+                    log_msg.append(f"Tool Use Prompt Tokens Count: {get_val(u, 'tool_use_prompt_token_count')}")
+                    log_msg.append("")
+                    log_msg.append(f"Total Token Count: {get_val(u, 'total_token_count')}")
+                    log_msg.append(f"Total Estimated Cost: ${costs['total_cost']:.6f}")
+                    log_msg.append(f"Traffic Type: {getattr(u, 'traffic_type', 'N/A')}")
 
-            log_msg.append("=" * 30 + "\n")
-            logger.info("\n".join(log_msg))
+                log_msg.append("=" * 30 + "\n")
+                logger.info("\n".join(log_msg))
 
-            # Structured logging for costs
-            if response.usage_metadata:
-                logger.info({
-                    "transaction_type": "generation",
-                    "model": model,
-                    "module": type(module).__name__,
-                    "costs": costs,
-                    "duration": total_duration
-                })
-            # ----------------------
+                if response.usage_metadata:
+                    logger.info({
+                        "transaction_type": "generation", "model": model, "module": type(module).__name__,
+                        "costs": costs, "duration": total_duration
+                    })
 
-            self.print_final_summary()
+                self.print_final_summary()
 
-            if structure:
-                return response.parsed
+                if structure:
+                    return response.parsed
+                return response.text
 
-            return response.text
+            except Exception as e:
+                last_exception = e
+                logger.warning(f"Gemini response failed on attempt {attempt + 1} for model {model}: {e}")
+                time.sleep(2)  # Wait 2 seconds before retrying
+                continue  # to next attempt
 
-        except Exception as e:
-            logger.error(f"Gemini response failed: {e}")
-            raise
+        logger.error(f"All {max_retries} retries failed for model {model}.")
+        raise RuntimeError(
+            f"Failed to get response from Gemini model {model} after {max_retries} attempts.") from last_exception
 
     def upload_media(self, file_bytes: bytes, mime_type: str) -> types.File:
         """
