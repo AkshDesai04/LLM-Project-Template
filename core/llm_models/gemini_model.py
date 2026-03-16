@@ -45,116 +45,130 @@ class GeminiModel(LLMModels):
 
         last_exception = None
         max_retries = 3
+        models_to_try = [self.model_name] + self.fall_back_models
 
-        logger.info(f"Attempting generation with model: {model}")
-        for attempt in range(max_retries):
+        for model in models_to_try:
             try:
-                logger.info(f"Attempt {attempt + 1}/{max_retries} for model {model}")
-
-                # Configure thinking/reasoning
-                thinking_config_obj = None
-                if reasoning_budget:
-                    if isinstance(reasoning_budget, str):
-                        reasoning = ThinkingLevel(reasoning_budget)
-                        thinking_config_obj = types.ThinkingConfig(include_thoughts=True, thinking_level=reasoning)
-                    else:
-                        thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
-
-                # Build GenerateContentConfig
-                config = types.GenerateContentConfig(
-                    temperature=temperature,
-                    top_p=top_p,
-                    top_k=top_k,
-                    response_mime_type=response_mime_type,
-                    response_schema=structure,
-                    thinking_config=thinking_config_obj,
-                )
-
-                start_time = time.time()
-
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=config,
-                )
-
-                end_time = time.time()
-                total_duration = end_time - start_time
-
-                if not response.text and not getattr(response, 'parsed', None):
-                    raise ValueError("Received an empty response from Gemini.")
-
-                # --- Success: Log Metadata and return ---
-                log_msg = [
-                    "\n" + "=" * 30, "GEMINI METADATA REPORT", "=" * 30,
-                    f"Model: {model}", f"Total Wall-Clock Time: {total_duration:.4f}s"
-                ]
-
-                if response.usage_metadata:
-                    u = response.usage_metadata
-
-                    def get_val(obj, attr):
-                        return getattr(obj, attr, 0) or 0
-
-                    prompt_tokens = get_val(u, 'prompt_token_count')
-                    candidate_tokens = get_val(u, 'candidates_token_count')
-                    cached_tokens = get_val(u, 'cached_content_token_count')
-
-                    costs = self._calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
-                    self.record_transaction(type(module).__name__, model, costs, total_duration)
-
-                    log_msg.append(f"Cache Tokens Details: {getattr(u, 'cache_tokens_details', 'N/A')}")
-                    log_msg.append(f"Cached Content Token Count: {cached_tokens}")
-                    log_msg.append(f"Cached Cost: ${costs['cached_cost']:.6f}")
-                    log_msg.append("")
-                    log_msg.append(f"Candidates Token Count: {candidate_tokens}")
-                    log_msg.append(f"Candidates Tokens Details: {getattr(u, 'candidates_tokens_details', 'N/A')}")
-                    log_msg.append(f"Output Cost: ${costs['output_cost']:.6f}")
-                    log_msg.append("")
-                    log_msg.append(f"Prompt Tokens Count: {prompt_tokens}")
-
-                    details = getattr(u, 'prompt_tokens_details', None)
-                    if details:
-                        for detail in details:
-                            modality = "UNKNOWN"
-                            if hasattr(detail, 'modality'):
-                                modality = getattr(detail.modality, 'name', str(detail.modality))
-                            log_msg.append(f"Prompt Tokens Detail: {modality}: {detail.token_count}")
-
-                    log_msg.append(f"Input Cost: ${costs['input_cost']:.6f}")
-                    log_msg.append("")
-                    log_msg.append(f"Thoughts Token Count: {get_val(u, 'thoughts_token_count')}")
-                    log_msg.append("")
-                    log_msg.append(f"Tool Use Prompt Tokens Count: {get_val(u, 'tool_use_prompt_token_count')}")
-                    log_msg.append("")
-                    log_msg.append(f"Total Token Count: {get_val(u, 'total_token_count')}")
-                    log_msg.append(f"Total Estimated Cost: ${costs['total_cost']:.6f}")
-                    log_msg.append(f"Traffic Type: {getattr(u, 'traffic_type', 'N/A')}")
-
-                log_msg.append("=" * 30 + "\n")
-                logger.info("\n".join(log_msg))
-
-                if response.usage_metadata:
-                    logger.info({
-                        "transaction_type": "generation", "model": model, "module": type(module).__name__,
-                        "costs": costs, "duration": total_duration
-                    })
-
-                self.print_final_summary()
-
-                if structure:
-                    return response.parsed
-                return response.text
-
-            except Exception as e:
+                # Check for model pricing availability before making an API call
+                self._calculate_cost(model, 0, 0)
+            except ValueError as e:
+                logger.warning(f"Skipping model {model} due to missing pricing info: {e}")
                 last_exception = e
-                logger.warning(f"Gemini response failed on attempt {attempt + 1} for model {model}: {e}")
-                time.sleep(2)  # Wait 2 seconds before retrying
-                continue  # to next attempt
+                continue
 
-        logger.error(f"All {max_retries} retries failed for model {model}.")
+            logger.info(f"Attempting generation with model: {model}")
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"Attempt {attempt + 1}/{max_retries} for model {model}")
+
+                    # Configure thinking/reasoning
+                    thinking_config_obj = None
+                    if reasoning_budget:
+                        if isinstance(reasoning_budget, str):
+                            reasoning = ThinkingLevel(reasoning_budget)
+                            thinking_config_obj = types.ThinkingConfig(include_thoughts=True, thinking_level=reasoning)
+                        else:
+                            thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
+
+                    # Build GenerateContentConfig
+                    config = types.GenerateContentConfig(
+                        temperature=temperature,
+                        top_p=top_p,
+                        top_k=top_k,
+                        response_mime_type=response_mime_type,
+                        response_schema=structure,
+                        thinking_config=thinking_config_obj,
+                    )
+
+                    start_time = time.time()
+
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=contents,
+                        config=config,
+                    )
+
+                    end_time = time.time()
+                    total_duration = end_time - start_time
+
+                    if not response.text and not getattr(response, 'parsed', None):
+                        raise ValueError("Received an empty response from Gemini.")
+
+                    # --- Success: Log Metadata and return ---
+                    log_msg = [
+                        "\n" + "=" * 30, "GEMINI METADATA REPORT", "=" * 30,
+                        f"Model: {model}", f"Total Wall-Clock Time: {total_duration:.4f}s"
+                    ]
+
+                    if response.usage_metadata:
+                        u = response.usage_metadata
+
+                        def get_val(obj, attr):
+                            return getattr(obj, attr, 0) or 0
+
+                        prompt_tokens = get_val(u, 'prompt_token_count')
+                        candidate_tokens = get_val(u, 'candidates_token_count')
+                        cached_tokens = get_val(u, 'cached_content_token_count')
+
+                        costs = self._calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
+                        self.record_transaction(type(module).__name__, model, costs, total_duration)
+
+                        log_msg.append(f"Cache Tokens Details: {getattr(u, 'cache_tokens_details', 'N/A')}")
+                        log_msg.append(f"Cached Content Token Count: {cached_tokens}")
+                        log_msg.append(f"Cached Cost: ${costs['cached_cost']:.6f}")
+                        log_msg.append("")
+                        log_msg.append(f"Candidates Token Count: {candidate_tokens}")
+                        log_msg.append(f"Candidates Tokens Details: {getattr(u, 'candidates_tokens_details', 'N/A')}")
+                        log_msg.append(f"Output Cost: ${costs['output_cost']:.6f}")
+                        log_msg.append("")
+                        log_msg.append(f"Prompt Tokens Count: {prompt_tokens}")
+
+                        details = getattr(u, 'prompt_tokens_details', None)
+                        if details:
+                            for detail in details:
+                                modality = "UNKNOWN"
+                                if hasattr(detail, 'modality'):
+                                    modality = getattr(detail.modality, 'name', str(detail.modality))
+                                log_msg.append(f"Prompt Tokens Detail: {modality}: {detail.token_count}")
+
+                        log_msg.append(f"Input Cost: ${costs['input_cost']:.6f}")
+                        log_msg.append("")
+                        log_msg.append(f"Thoughts Token Count: {get_val(u, 'thoughts_token_count')}")
+                        log_msg.append("")
+                        log_msg.append(f"Tool Use Prompt Tokens Count: {get_val(u, 'tool_use_prompt_token_count')}")
+                        log_msg.append("")
+                        log_msg.append(f"Total Token Count: {get_val(u, 'total_token_count')}")
+                        log_msg.append(f"Total Estimated Cost: ${costs['total_cost']:.6f}")
+                        log_msg.append(f"Traffic Type: {getattr(u, 'traffic_type', 'N/A')}")
+
+                    log_msg.append("=" * 30 + "\n")
+                    logger.info("\n".join(log_msg))
+
+                    if response.usage_metadata:
+                        logger.info({
+                            "transaction_type": "generation", "model": model, "module": type(module).__name__,
+                            "costs": costs, "duration": total_duration
+                        })
+
+                    self.print_final_summary()
+
+                    if structure:
+                        return response.parsed
+                    return response.text
+
+                except Exception as e:
+                    last_exception = e
+                    logger.warning(f"Gemini response failed on attempt {attempt + 1} for model {model}: {e}")
+                    time.sleep(2)
+                    continue  # to next attempt
+            
+            # If we successfully get a response, the function will have returned, so we break the model loop.
+            # This part is unreachable if successful, but good for clarity.
+            break 
+
+        logger.error(f"All retries failed for all specified models.")
         raise RuntimeError(
-            f"Failed to get response from Gemini model {model} after {max_retries} attempts.") from last_exception
+            f"Failed to get response from Gemini after trying all specified models.") from last_exception
 
     def upload_media(self, file_bytes: bytes, mime_type: str) -> types.File:
         """

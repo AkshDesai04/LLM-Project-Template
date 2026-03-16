@@ -3,6 +3,10 @@ import time
 import base64
 from io import BytesIO
 from typing import Optional, List, Any, Union
+import os
+import tempfile
+import cv2
+
 
 import PyPDF2
 from openai import OpenAI
@@ -32,7 +36,16 @@ class OpenAIModel(LLMModels):
         messages = []
         files = []
         if uploaded_file:
-            files = uploaded_file if isinstance(uploaded_file, list) else [uploaded_file]
+            if isinstance(uploaded_file, list):
+                # If uploaded_file is a list, check if its elements are also lists (e.g. from video frames)
+                if any(isinstance(i, list) for i in uploaded_file):
+                    # Flatten the list
+                    files = [item for sublist in uploaded_file for item in sublist]
+                else:
+                    files = uploaded_file
+            else:
+                files = [uploaded_file]
+
 
         image_contents = [f for f in files if isinstance(f, dict) and f.get("type") == "image_url"]
         text_contents = [f for f in files if isinstance(f, str)]
@@ -143,7 +156,7 @@ class OpenAIModel(LLMModels):
         Uploads/Processes media.
         - PDF: Extracts text locally (str).
         - Images: Encodes to Base64 for Vision API (dict).
-        - Video: Not supported (requires frame extraction).
+        - Video: Extracts frames and encodes them as Base64.
         """
         try:
             if mime_type == 'application/pdf':
@@ -160,9 +173,8 @@ class OpenAIModel(LLMModels):
                     }
                 }
             elif mime_type.startswith('video/'):
-                logger.error("OpenAI does not support raw video upload via Chat Completions.")
-                raise NotImplementedError(
-                    "OpenAI Chat API requires video to be split into frames. Raw video upload is not supported in this wrapper.")
+                logger.info(f"Processing {mime_type} for OpenAI by extracting frames...")
+                return self._process_video_for_openai(file_bytes)
             else:
                 # Fallback for plain text files
                 logger.info(f"Treating {mime_type} as plain text...")
@@ -171,6 +183,45 @@ class OpenAIModel(LLMModels):
         except Exception as e:
             logger.error(f"OpenAI media upload failed: {e}")
             raise RuntimeError(f"Failed to process {mime_type} for OpenAI: {e}")
+
+    def _process_video_for_openai(self, video_bytes: bytes, frames_per_second: int = 1) -> List[dict]:
+        """
+        Extracts frames from video bytes, encodes them, and returns a list of dictionaries.
+        """
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        temp_file.write(video_bytes)
+        temp_file.close()
+
+        base64_frames = []
+        video = cv2.VideoCapture(temp_file.name)
+        total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = video.get(cv2.CAP_PROP_FPS)
+        
+        frame_interval = int(fps / frames_per_second)
+        
+        try:
+            for frame_num in range(0, total_frames, frame_interval):
+                video.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                success, frame = video.read()
+                if not success:
+                    continue
+                _, buffer = cv2.imencode(".jpeg", frame)
+                base64_frames.append(base64.b64encode(buffer).decode("utf-8"))
+        finally:
+            video.release()
+            os.unlink(temp_file.name)
+
+        logger.info(f"Extracted {len(base64_frames)} frames from video.")
+
+        return [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{b64_frame}"
+                }
+            }
+            for b64_frame in base64_frames
+        ]
 
     def _extract_text_from_pdf_bytes(self, pdf_bytes: bytes) -> str:
         """Helper to extract text from PDF bytes using PyPDF2."""

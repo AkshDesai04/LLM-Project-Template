@@ -74,6 +74,7 @@ class LLMModels(ABC):
         self.temperature = base_config.temperature
         self.top_p = base_config.top_p
         self.top_k = base_config.top_k
+        self.fall_back_models = getattr(base_config, 'fall_back_models', None)
         self.structure = base_config.structure
         self.response_mime_type = base_config.response_mime_type
 
@@ -171,8 +172,7 @@ class LLMModels(ABC):
                     break
 
         if not rates:
-            logger.warning(f"No pricing information found for model '{model_name}'. Costs will be zero.")
-            return {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
+            raise ValueError(f"No pricing information found for model '{model_name}'.")
 
         # Tiered pricing threshold
         TIER_THRESHOLD = 200_000
@@ -218,6 +218,20 @@ class LLMModels(ABC):
             "cached_cost": cached_cost,
             "total_cost": total_cost,
         }
+
+    @staticmethod
+    def get_provider_by_model_name(model_name: str) -> str:
+        """Determines the model provider based on the model name prefix."""
+        model_name_lower = model_name.lower()
+        if model_name_lower.startswith("gpt"):
+            return "openai"
+        elif model_name_lower.startswith("gemini"):
+            return "google"
+        elif model_name_lower.startswith(("o1-", "o3-")):
+            return "openai"
+        
+        raise ValueError(f"Could not determine provider for model '{model_name}'. "
+                         f"Model name should start with 'gpt' or 'gemini'.")
 
     @staticmethod
     def prepare_module(module: Any) -> BaseModule:
