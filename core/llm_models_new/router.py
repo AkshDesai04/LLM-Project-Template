@@ -21,9 +21,17 @@ class ModelRouter:
             except IndexError:
                 raise ValueError(f"Fallback index {fallback_index} is out of range.")
 
-        module_for_init = module.copy(update={'model': model_name})
+        module_for_init = module.model_copy(update={'model': model_name})
         
         provider = self.get_provider_by_model_name(model_name)
+        model_name_lower = model_name.lower()
+
+        # Strip provider prefix if present (e.g., 'ollama/llama3.2:1b' -> 'llama3.2:1b')
+        if "/" in model_name:
+            # Currently only ollama/ is supported for stripping this way in this router
+            if model_name_lower.startswith("ollama/"):
+                model_name = model_name.split("/", 1)[1]
+                module_for_init = module.model_copy(update={'model': model_name})
 
         logger.info(f"Routing to provider: {provider} for model '{model_name}'")
 
@@ -60,6 +68,12 @@ class ModelRouter:
             from .providers.perplexity import PerplexityProvider
             self.model_instance = PerplexityProvider(api_key, LLMProvider.prepare_module(module_for_init))
             
+        elif provider == 'ollama':
+            # Ollama usually doesn't need an API key, but we'll use a placeholder if not provided
+            api_key = get_local_secret("OLLAMA_KEY", raise_error=False) or "local-key"
+            from .providers.ollama import OllamaProvider
+            self.model_instance = OllamaProvider(api_key, LLMProvider.prepare_module(module_for_init))
+            
         else:
             raise ValueError(f"Unsupported provider: '{provider}'")
 
@@ -67,19 +81,31 @@ class ModelRouter:
     def get_provider_by_model_name(model_name: str) -> str:
         """Determines the model provider based on the model name prefix."""
         model_name_lower = model_name.lower()
+        if model_name_lower.startswith("ollama/"):
+            return "ollama"
         if model_name_lower.startswith("gpt"):
             return "openai"
         elif model_name_lower.startswith("gemini"):
             return "google"
         elif model_name_lower.startswith(("o1", "o3", "gpt-5")):
             return "openai"
-        elif model_name_lower.startswith(("sonar", "llama", "perplexity")):
+        elif model_name_lower.startswith(("sonar", "perplexity")):
+            return "perplexity"
+        elif model_name_lower.startswith(("ollama", "mistral", "phi", "qwen")):
+            return "ollama"
+        elif model_name_lower.startswith("llama"):
+            # Default llama to perplexity for backward compatibility, 
+            # unless it's explicitly prefixed with ollama elsewhere.
             return "perplexity"
         
         raise ValueError(f"Could not determine provider for model '{model_name}'. "
-                         f"Model name should start with 'gpt', 'gemini', or 'sonar'.")
+                         f"Model name should start with 'gpt', 'gemini', 'sonar', or 'ollama'.")
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
+        if 'model' in kwargs:
+            model_name = kwargs['model']
+            if model_name.lower().startswith("ollama/"):
+                kwargs['model'] = model_name.split("/", 1)[1]
         return self.model_instance.model_response(module, uploaded_file, **kwargs)
 
     def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:

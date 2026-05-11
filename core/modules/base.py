@@ -1,50 +1,50 @@
-from typing import Any, ClassVar, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
 class Base(BaseModel):
     # Core
-    prompt: ClassVar[str | None] = None
-    system_prompt: ClassVar[str | None] = None
-    structure: ClassVar[Any | None] = None
+    prompt: str | None = None
+    system_prompt: str | None = None
+    structure: Any | None = None
 
     # Model Selection
-    model: ClassVar[str] = "gemini-2.5-pro"
+    model: str = "gemini-2.5-pro"
 
-    fallback_models: ClassVar[list[str]] = [
+    fallback_models: list[str] = [
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
     ]
 
     # Generation
-    temperature: ClassVar[float] = 0.2
-    top_p: ClassVar[float] = 0.8
-    top_k: ClassVar[int] = 40
-    max_tokens: ClassVar[int | None] = None
-    reasoning_budget: ClassVar[int | Literal["low", "medium", "high"] | None] = None
+    temperature: float = 0.2
+    top_p: float = 0.8
+    top_k: int = 40
+    max_tokens: int | None = None
+    reasoning_budget: int | Literal["low", "medium", "high"] | None = None
 
     # Penalties & Sampling
-    presence_penalty: ClassVar[float] = 0.0
-    frequency_penalty: ClassVar[float] = 0.0
-    seed: ClassVar[int | None] = None
-    stop_sequences: ClassVar[list[str] | None] = None
+    presence_penalty: float = 0.0
+    frequency_penalty: float = 0.0
+    seed: int | None = None
+    stop_sequences: list[str] | None = None
 
     # Response
-    response_mime_type: ClassVar[str] = "application/json"
-    stream: ClassVar[bool] = False
+    response_mime_type: str = "application/json"
+    stream: bool = False
 
     # Logging / Debugging
-    logprobs: ClassVar[bool] = False
-    top_logprobs: ClassVar[int | None] = None
+    logprobs: bool = False
+    top_logprobs: int | None = None
 
     # Provider Features
-    service_tier: ClassVar[Literal["auto", "default"] | None] = None
-    candidate_count: ClassVar[int] = 1
-    safety_settings: ClassVar[Any | None] = None
-    tools: ClassVar[Any | None] = None
+    service_tier: Literal["auto", "default"] | None = None
+    candidate_count: int = 1
+    safety_settings: Any | None = None
+    tools: Any | None = None
 
     # Search / Retrieval
-    return_citations: ClassVar[bool] = True
-    search_domain_filter: ClassVar[list[str] | None] = None
-    search_recency_filter: ClassVar[str | None] = None
+    return_citations: bool = True
+    search_domain_filter: list[str] | None = None
+    search_recency_filter: str | None = None
