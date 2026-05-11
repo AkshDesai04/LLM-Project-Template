@@ -43,6 +43,7 @@ def get_secret_dict(secret_name: str) -> dict:
 
         _aws_secrets_cache[secret_name] = secret_dict
         logger.info(f"Successfully fetched and cached secret '{secret_name}'.")
+        print(secret_dict)
         return secret_dict
     except ClientError as e:
         logger.error(f"Failed to retrieve secret '{secret_name}' from AWS: {e}")
@@ -53,15 +54,16 @@ def get_secret_dict(secret_name: str) -> dict:
 def get_aws_secret(key_name: str, secret_name: str) -> str | None:
     try:
         secret_dict = get_secret_dict(secret_name)
+        print(secret_dict)
         return secret_dict.get(key_name)
     except ClientError:
         return None
 
 
-def get_local_secret(key_name: str) -> str:
+def get_local_secret(key_name: str, raise_error: bool = True) -> str | None:
     load_dotenv()
     value = os.getenv(key_name)
-    if not value:
+    if not value and raise_error:
         logger.error(f"Local environment variable '{key_name}' not set.")
         raise ValueError(f"Local environment variable '{key_name}' not set.")
     return value

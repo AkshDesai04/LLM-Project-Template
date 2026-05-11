@@ -24,13 +24,29 @@ class OpenAIModel(LLMModels):
         super().__init__(api_key, base)
         self.client = OpenAI(api_key=api_key)
 
-    def model_response(self, module: Any, uploaded_file: Optional[Any] = None) -> Any:
+    def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         prompt = module.prompt
-        structure = module.structure
-        model = self.model_name  # Use the model set during initialization
-        temperature = getattr(module, 'temperature', self.temperature)
-        top_p = getattr(module, 'top_p', self.top_p)
-        reasoning_effort = getattr(module, 'reasoning_budget', None)
+        structure = kwargs.get('schema') or kwargs.get('structure') or module.structure
+        model = kwargs.get('model', self.model_name)
+        temperature = kwargs.get('temperature', getattr(module, 'temperature', self.temperature))
+        top_p = kwargs.get('top_p', getattr(module, 'top_p', self.top_p))
+        reasoning_effort = kwargs.get('reasoning_effort') or kwargs.get('reasoning_budget') or getattr(module, 'reasoning_budget', None)
+        
+        system_prompt = kwargs.get('system_prompt')
+        seed = kwargs.get('seed')
+        max_tokens = kwargs.get('max_tokens')
+        stop = kwargs.get('stop') or kwargs.get('stop_sequences')
+        presence_penalty = kwargs.get('presence_penalty')
+        frequency_penalty = kwargs.get('frequency_penalty')
+        logit_bias = kwargs.get('logit_bias')
+        tools = kwargs.get('tools') or kwargs.get('function')
+        tool_choice = kwargs.get('tool_choice')
+        parallel_tool_calls = kwargs.get('parallel_tool_calls')
+        logprobs = kwargs.get('logprobs') or kwargs.get('log_prob')
+        top_logprobs = kwargs.get('top_logprobs')
+        service_tier = kwargs.get('service_tier')
+        modalities = kwargs.get('modalities')
+        audio = kwargs.get('audio')
 
         # Construct messages payload once
         messages = []
@@ -63,9 +79,12 @@ class OpenAIModel(LLMModels):
             if text_contents:
                 full_prompt += "\n\n" + "\n\n".join([f"[Attached Content]:\n{t}" for t in text_contents])
             messages.append({"role": "user", "content": full_prompt})
+            
+        if system_prompt:
+            messages.insert(0, {"role": "system", "content": system_prompt})
 
         last_exception = None
-        max_retries = 3
+        max_retries = kwargs.get('max_retries', 3)
 
         logger.info(f"Attempting generation with model: {model}")
         for attempt in range(max_retries):
@@ -73,24 +92,48 @@ class OpenAIModel(LLMModels):
                 logger.info(f"Attempt {attempt + 1}/{max_retries} for model {model}")
                 start_time = time.time()
 
-                kwargs = {"model": model, "messages": messages, "temperature": temperature, "top_p": top_p}
+                call_kwargs = {
+                    "model": model, "messages": messages, "temperature": temperature, "top_p": top_p
+                }
+                
+                # Apply extra kwargs
+                if seed is not None: call_kwargs["seed"] = seed
+                if max_tokens is not None: call_kwargs["max_tokens"] = max_tokens
+                if stop is not None: call_kwargs["stop"] = stop
+                if presence_penalty is not None: call_kwargs["presence_penalty"] = presence_penalty
+                if frequency_penalty is not None: call_kwargs["frequency_penalty"] = frequency_penalty
+                if logit_bias is not None: call_kwargs["logit_bias"] = logit_bias
+                if tools is not None: call_kwargs["tools"] = tools
+                if tool_choice is not None: call_kwargs["tool_choice"] = tool_choice
+                if parallel_tool_calls is not None: call_kwargs["parallel_tool_calls"] = parallel_tool_calls
+                if logprobs is not None: call_kwargs["logprobs"] = logprobs
+                if top_logprobs is not None: call_kwargs["top_logprobs"] = top_logprobs
+                if service_tier is not None: call_kwargs["service_tier"] = service_tier
+                if modalities is not None: call_kwargs["modalities"] = modalities
+                if audio is not None: call_kwargs["audio"] = audio
 
-                is_reasoning_model = any(x in model.lower() for x in ["o1-", "o3-", "gpt-5"])
+                is_reasoning_model = any(x in model.lower() for x in ["o1", "o3", "gpt-5"])
                 if is_reasoning_model:
-                    kwargs.pop("temperature", None)
-                    kwargs.pop("top_p", None)
+                    call_kwargs.pop("temperature", None)
+                    call_kwargs.pop("top_p", None)
+                    call_kwargs.pop("presence_penalty", None)
+                    call_kwargs.pop("frequency_penalty", None)
+                    
+                    if "max_tokens" in call_kwargs:
+                        call_kwargs["max_completion_tokens"] = call_kwargs.pop("max_tokens")
+                        
                     if reasoning_effort and isinstance(reasoning_effort, str):
-                        kwargs["reasoning_effort"] = reasoning_effort.lower()
+                        call_kwargs["reasoning_effort"] = reasoning_effort.lower()
 
                 parsed_object = None
                 if structure and inspect.isclass(structure) and issubclass(structure, BaseModel):
-                    response = self.client.beta.chat.completions.parse(**kwargs, response_format=structure)
+                    response = self.client.beta.chat.completions.parse(**call_kwargs, response_format=structure)
                     parsed_object = response.choices[0].message.parsed
                     output_content = response.choices[0].message.content
                 else:
                     if structure:
-                        kwargs["response_format"] = {"type": "json_object"}
-                    response = self.client.chat.completions.create(**kwargs)
+                        call_kwargs["response_format"] = {"type": "json_object"}
+                    response = self.client.chat.completions.create(**call_kwargs)
                     output_content = response.choices[0].message.content
 
                 end_time = time.time()

@@ -5,6 +5,7 @@ from utils.logger import get_logger
 from .llm_model_base import LLMModels, JudgeResult
 from .gemini_model import initialize_gemini
 from .openai_model import initialize_openai
+from .perplexity_model import initialize_perplexity
 from ..modules.base import Base as BaseModule
 
 logger = get_logger("ModelRouter")
@@ -40,13 +41,18 @@ class ModelRouter:
         elif provider == 'openai':
             api_key = api_keys.get("OPEN_AI_KEY")
             if not api_key:
-                raise ValueError("Provider is 'openai', but OPENAI_KEY not in api_keys.")
+                raise ValueError("Provider is 'openai', but OPEN_AI_KEY not in api_keys.")
             self.model_instance = initialize_openai(api_key, module_for_init)
+        elif provider == 'perplexity':
+            api_key = api_keys.get("PERPLEXITY_KEY")
+            if not api_key:
+                raise ValueError("Provider is 'perplexity', but PERPLEXITY_KEY not in api_keys.")
+            self.model_instance = initialize_perplexity(api_key, module_for_init)
         else:
             raise ValueError(f"Unsupported provider: '{provider}'")
 
-    def model_response(self, module: Any, uploaded_file: Optional[Any] = None) -> Any:
-        return self.model_instance.model_response(module, uploaded_file)
+    def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
+        return self.model_instance.model_response(module, uploaded_file, **kwargs)
 
     def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:
         return self.model_instance.upload_media(file_bytes, mime_type)
