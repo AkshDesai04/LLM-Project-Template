@@ -1,27 +1,8 @@
-from pydantic import Field
-
 from core.modules.base import Base
+from utils.file_ops import read_prompt
 
 
-class TestStruct(Base):
-    response: str = Field(
-        ...,
-        description="The first 1000 words of Lorem ipsum."
-    )
-
-
-class TestModule(Base):
-    # model: str = "gpt-5-nano-2025-08-07"
-    # model = "gpt-4.1-nano-2025-04-14"
-    model = "gpt-5.5-pro-2026-04-23"
-
-    prompt = "Give me the first 1000 words of Lorem ipsum."
-
-    stream = False
-    logprobs = False
-
-    # structure = TestStruct
-
-    service_tier = None
-
-    response_mime_type = "application/json"
+class FileSummaryPrompt(Base):
+    prompt: str = read_prompt('test_prompt')
+    model: str = 'ollama/llama3.2:1b'
+    fallback_models: list[str] = ['gemini-2.5-flash-lite']

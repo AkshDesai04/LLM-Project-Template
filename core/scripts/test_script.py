@@ -1,6 +1,5 @@
-import os
 from core.llm_models_new.router import ModelRouter
-from tests.TestModule import FileSummaryPrompt
+from core.modules.test_module import FileSummaryPrompt
 from utils.env_ops import get_keys_dict
 from utils.logger import get_logger
 import time
@@ -21,24 +20,22 @@ def main():
         logger.warning(f"Could not retrieve API keys (continuing for Ollama): {e}")
         api_keys = {}
 
-    model_name = "ollama/llama3.2:1b"
-    
     try:
-        # 2. Initialize the Prompt Module
-        prompt_module = FileSummaryPrompt(model=model_name)
+        # 2. Initialize the Prompt Module (Uses default model from class definition)
+        prompt_module = FileSummaryPrompt()
         
         # 3. Initialize Model Router (New Architecture)
         router = ModelRouter(prompt_module, api_keys)
 
         # 4. Hit the model
-        logger.info(f"Sending request to model: {model_name}...")
+        logger.info(f"Sending request to model: {prompt_module.model}...")
         start_time = time.time()
         response = router.model_response(prompt_module)
         duration = time.time() - start_time
         
-        logger.info(f"Successfully received response from {model_name} in {duration:.2f}s")
+        logger.info(f"Successfully received response from {prompt_module.model} in {duration:.2f}s")
         print("="*70)
-        print(f"MODEL: {model_name}")
+        print(f"MODEL: {prompt_module.model}")
         print("="*70)
         print(f"RESPONSE: {response}")
         print("="*70)
