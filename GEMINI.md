@@ -135,7 +135,7 @@ Standardized IO operations ensuring utf-8 encodings and proper error handling.
 Provides a robust, dual-output logging system.
 *   **Key Features:**
     *   Outputs standard readable logs to the terminal (`sys.stdout`).
-    *   Simultaneously writes **JSON formatted** logs to `logs/rfp_ai_{YYYYMMDD}.log`. This JSON structure is crucial for downstream analysis of metadata, exceptions, and token costs recorded by the LLM models.
+    *   Simultaneously writes **JSON formatted** logs to `logs/logs_{YYYYMMDD}.log`. This JSON structure is crucial for downstream analysis of metadata, exceptions, and token costs recorded by the LLM models.
 
 ### `utils/parallel_executor.py`
 A highly resilient, multi-threading utility specifically designed for managing concurrent tasks, particularly network requests to LLM APIs where rate-limiting and intermittent failures are common.
