@@ -116,3 +116,52 @@ class ModelRouter:
 
     def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
         return self.model_instance.evaluate_response(input_prompt, generated_output, rubric)
+
+    def to_langchain_model(self, **kwargs) -> Any:
+        """
+        Returns a LangChain-compatible model instance.
+        """
+        provider = self.get_provider_by_model_name(self.model_instance.model_name)
+        model_name = self.model_instance.model_name
+        
+        # Common generation parameters
+        gen_params = {
+            "temperature": self.model_instance.temperature,
+            "max_tokens": self.model_instance.max_tokens,
+            "top_p": self.model_instance.top_p,
+            **kwargs
+        }
+
+        if provider == 'openai':
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                model=model_name,
+                api_key=self.model_instance.api_key,
+                **gen_params
+            )
+        elif provider == 'google':
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            return ChatGoogleGenerativeAI(
+                model=model_name,
+                google_api_key=self.model_instance.api_key,
+                **gen_params
+            )
+        elif provider == 'ollama':
+            from langchain_ollama import ChatOllama
+            # Resolve host from env or default
+            ollama_url = get_local_secret("OLLAMA_URL", raise_error=False) or "http://localhost:11434"
+            return ChatOllama(
+                model=model_name,
+                base_url=ollama_url,
+                **gen_params
+            )
+        elif provider == 'perplexity':
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                model=model_name,
+                openai_api_key=self.model_instance.api_key,
+                openai_api_base="https://api.perplexity.ai",
+                **gen_params
+            )
+        else:
+            raise ValueError(f"LangChain integration not yet implemented for provider: {provider}")

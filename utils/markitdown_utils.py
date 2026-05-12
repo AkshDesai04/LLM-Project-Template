@@ -1,21 +1,21 @@
 import os
-from typing import Optional, Any, Union
+from typing import Optional, Any, Union, List, Iterator
 from markitdown import MarkItDown
 from utils.logger import get_logger
 
+try:
+    from langchain_core.document_loaders import BaseLoader
+    from langchain_core.documents import Document
+except ImportError:
+    class BaseLoader: pass
+    class Document: pass
+
 logger = get_logger("MarkItDownUtils")
 
-class MarkItDownUtils:
+class MarkItDownUtils(BaseLoader):
     """
     A comprehensive utility class for converting various file formats and data sources
-    into Markdown using Microsoft's MarkItDown.
-    
-    Supported formats include:
-    - Documents: PDF, DOCX, PPTX, XLSX, XLS, EPub
-    - Data: CSV, JSON, XML
-    - Media: Images (EXIF/OCR), Audio (Transcription)
-    - Web: HTML, YouTube (Transcripts)
-    - Archives: ZIP
+    into Markdown using Microsoft's MarkItDown. Inherits from LangChain's BaseLoader.
     """
 
     def __init__(
@@ -23,16 +23,11 @@ class MarkItDownUtils:
         llm_client: Optional[Any] = None, 
         llm_model: Optional[str] = None,
         docintel_endpoint: Optional[str] = None,
-        enable_plugins: bool = True
+        enable_plugins: bool = True,
+        file_path: Optional[str] = None
     ):
         """
         Initializes the MarkItDown converter.
-        
-        Args:
-            llm_client: Optional LLM client (e.g., OpenAI or Gemini) for image description or OCR.
-            llm_model: Optional model name to use for LLM-based processing.
-            docintel_endpoint: Optional Azure Document Intelligence endpoint for high-fidelity conversion.
-            enable_plugins: Whether to enable plugins (like markitdown-ocr for scanned documents).
         """
         logger.info(f"Initializing MarkItDown utility (plugins={enable_plugins})...")
         self.md = MarkItDown(
@@ -41,6 +36,26 @@ class MarkItDownUtils:
             docintel_endpoint=docintel_endpoint,
             enable_plugins=enable_plugins
         )
+        self.file_path = file_path
+
+    def lazy_load(self) -> Iterator[Document]:
+        """
+        Implements LangChain's lazy_load method.
+        """
+        if not self.file_path:
+            raise ValueError("file_path must be provided to use lazy_load()")
+        
+        content = self.convert(self.file_path)
+        yield Document(
+            page_content=content,
+            metadata={"source": self.file_path}
+        )
+
+    def load(self) -> List[Document]:
+        """
+        Implements LangChain's load method.
+        """
+        return list(self.lazy_load())
 
     def convert(self, source: str) -> str:
         """
