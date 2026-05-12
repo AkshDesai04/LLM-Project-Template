@@ -144,7 +144,7 @@ class GeminiProvider(LLMProvider):
                     continue
             break 
 
-        raise RuntimeError(f"Failed to get response from Gemini after trying all specified models.") from last_exception
+        raise RuntimeError("Failed to get response from Gemini after trying all specified models.") from last_exception
 
     def upload_media(self, file_bytes: bytes, mime_type: str) -> types.File:
         try:

@@ -1,4 +1,4 @@
-from core.llm_models_new.router import ModelRouter
+from core.llm_models.router import ModelRouter
 from core.modules.test_module import FileSummaryPrompt
 from utils.env_ops import get_keys_dict
 from utils.logger import get_logger
