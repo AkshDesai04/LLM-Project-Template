@@ -1,23 +1,47 @@
+# ============================================
+# Environment & Configuration
+# ============================================
+
 # env_ops
 boto3==1.42.45
-python-dotenv==1.2.1
+python-dotenv==1.2.2
 
-# pdf_ops
-PyPDF2==3.0.1
+
+# ============================================
+# Data Validation
+# ============================================
 
 # pydantics
 pydantic==2.12.5
 
+
+# ============================================
+# LLM & AI Providers
+# ============================================
+
 google-genai==1.62.0
 #google-auth==2.35.0
 openai==2.18.0
-ollama==0.6.1
+ollama==0.6.2
 perplexityai==0.30.1
-httpx
+httpx==0.28.1
+
+
+# ============================================
+# PDF & Document Processing
+# ============================================
+
+# pdf_ops
+PyPDF2==3.0.1
+
+# doc ops
+markitdown==0.1.5
+
+
+# ============================================
+# Video & Image Processing
+# ============================================
 
 # video processing
 opencv-python-headless==4.9.0.80
 numpy==1.26.4
-
-python-dotenv
-ollama
