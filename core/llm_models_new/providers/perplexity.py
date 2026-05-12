@@ -1,45 +1,40 @@
-import inspect
 import time
 from typing import Any, Optional, List, Union
 
-from pydantic import BaseModel
-
 from utils.logger import get_logger
-from .llm_model_base import LLMModels, JudgeResult
-from ..modules.base import Base as BaseModule
+from ..base_provider import LLMProvider, JudgeResult
+from ..cost_tracker import cost_tracker
+from core.modules.base import Base as BaseModule
 
-# Use the official OpenAI client pointing to Perplexity, or the custom Perplexity package
 try:
     from openai import OpenAI
 except ImportError:
     OpenAI = None
 
-logger = get_logger("Perplexity")
+logger = get_logger("PerplexityProvider")
 
-
-class PerplexityModel(LLMModels):
+class PerplexityProvider(LLMProvider):
     def __init__(self, api_key: str, base: BaseModule):
         super().__init__(api_key, base)
-        # Standard approach for Perplexity is using the OpenAI client with their base_url
         if OpenAI:
             self.client = OpenAI(api_key=api_key, base_url="https://api.perplexity.ai")
         else:
             raise ImportError("OpenAI package required for Perplexity routing. Run `pip install openai`")
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
-        prompt = module.prompt
-        structure = kwargs.get('schema') or kwargs.get('structure') or module.structure
+        prompt = getattr(module, 'prompt', "")
         model = kwargs.get('model', self.model_name)
         temperature = kwargs.get('temperature', getattr(module, 'temperature', self.temperature))
         top_p = kwargs.get('top_p', getattr(module, 'top_p', self.top_p))
         
-        system_prompt = kwargs.get('system_prompt')
-        max_tokens = kwargs.get('max_tokens')
-        presence_penalty = kwargs.get('presence_penalty')
-        frequency_penalty = kwargs.get('frequency_penalty')
-        search_domain_filter = kwargs.get('search_domain_filter')
-        return_citations = kwargs.get('return_citations', True)
-        search_recency_filter = kwargs.get('search_recency_filter')
+        system_prompt = kwargs.get('system_prompt', getattr(module, 'system_prompt', self.system_prompt))
+        max_tokens = kwargs.get('max_tokens', getattr(module, 'max_tokens', self.max_tokens))
+        presence_penalty = kwargs.get('presence_penalty', getattr(module, 'presence_penalty', self.presence_penalty))
+        frequency_penalty = kwargs.get('frequency_penalty', getattr(module, 'frequency_penalty', self.frequency_penalty))
+        search_domain_filter = kwargs.get('search_domain_filter', getattr(module, 'search_domain_filter', self.search_domain_filter))
+        return_citations = kwargs.get('return_citations', getattr(module, 'return_citations', self.return_citations))
+        search_recency_filter = kwargs.get('search_recency_filter', getattr(module, 'search_recency_filter', self.search_recency_filter))
+        stream = kwargs.get('stream', getattr(module, 'stream', self.stream))
 
         messages = []
         if system_prompt:
@@ -66,7 +61,6 @@ class PerplexityModel(LLMModels):
         if presence_penalty is not None: call_kwargs["presence_penalty"] = presence_penalty
         if frequency_penalty is not None: call_kwargs["frequency_penalty"] = frequency_penalty
 
-        # These are specific to some SDKs, we inject them gracefully
         if search_domain_filter is not None: call_kwargs["search_domain_filter"] = search_domain_filter
         if return_citations is not None: call_kwargs["return_citations"] = return_citations
         if search_recency_filter is not None: call_kwargs["search_recency_filter"] = search_recency_filter
@@ -82,9 +76,7 @@ class PerplexityModel(LLMModels):
 
                 response = self.client.chat.completions.create(**call_kwargs)
 
-                end_time = time.time()
-                total_duration = end_time - start_time
-
+                total_duration = time.time() - start_time
                 output_content = response.choices[0].message.content
                 
                 usage = getattr(response, 'usage', None)
@@ -93,12 +85,11 @@ class PerplexityModel(LLMModels):
                     completion_tokens = getattr(usage, 'completion_tokens', 0)
                     
                     try:
-                        costs = self._calculate_cost(model, prompt_tokens, completion_tokens)
+                        costs = cost_tracker.calculate_cost(model, prompt_tokens, completion_tokens)
                     except ValueError:
-                        # Fallback for perplexity if not in CSV
                         costs = {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
 
-                    self.record_transaction(type(module).__name__, model, costs, total_duration)
+                    cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
 
                 return output_content
 
@@ -122,31 +113,14 @@ class PerplexityModel(LLMModels):
     def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
         judge_prompt = f"""
         You are an impartial judge evaluating the quality of an AI-generated response.
-
-        [Original Prompt]:
-        {input_prompt}
-
-        [AI Generated Response]:
-        {generated_output}
-
-        [Evaluation Rubric]:
-        {rubric if rubric else "Evaluate based on accuracy, clarity, and adherence to the prompt."}
-
+        [Original Prompt]: {input_prompt}
+        [AI Generated Response]: {generated_output}
+        [Evaluation Rubric]: {rubric if rubric else "Evaluate based on accuracy, clarity, and adherence to the prompt."}
         Please provide a score from 1-10, your reasoning, and any suggestions for improvement.
         """
-
         class JudgeModule(BaseModule):
             prompt: str = judge_prompt
             model: str = "sonar-pro"
 
         raw_output = self.model_response(JudgeModule())
         return JudgeResult(score=5, reasoning=raw_output, improvements="")
-
-
-def initialize_perplexity(key, module) -> PerplexityModel:
-    try:
-        module_instance = LLMModels.prepare_module(module)
-        return PerplexityModel(key, module_instance)
-    except Exception as e:
-        logger.error(f"Error initializing Perplexity: {e}")
-        raise

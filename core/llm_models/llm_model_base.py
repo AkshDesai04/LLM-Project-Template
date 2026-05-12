@@ -227,11 +227,13 @@ class LLMModels(ABC):
             return "openai"
         elif model_name_lower.startswith("gemini"):
             return "google"
-        elif model_name_lower.startswith(("o1-", "o3-")):
+        elif model_name_lower.startswith(("o1", "o3", "gpt-5")):
             return "openai"
+        elif model_name_lower.startswith(("sonar", "llama", "perplexity")):
+            return "perplexity"
         
         raise ValueError(f"Could not determine provider for model '{model_name}'. "
-                         f"Model name should start with 'gpt' or 'gemini'.")
+                         f"Model name should start with 'gpt', 'gemini', or 'sonar'.")
 
     @staticmethod
     def prepare_module(module: Any) -> BaseModule:
@@ -255,7 +257,7 @@ class LLMModels(ABC):
         return module_instance
 
     @abstractmethod
-    def model_response(self, module: Any, uploaded_file: Optional[Any] = None) -> Optional[str]:
+    def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         pass
 
     @abstractmethod

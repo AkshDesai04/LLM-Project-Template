@@ -1,8 +1,14 @@
 import os
 import json
-import boto3
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+    BOTO3_AVAILABLE = True
+except ImportError:
+    BOTO3_AVAILABLE = False
+    class ClientError(Exception): pass
+
 from dotenv import load_dotenv
-from botocore.exceptions import ClientError
 from utils.logger import get_logger
 
 logger = get_logger("EnvOps")
@@ -19,6 +25,10 @@ def _get_secrets_manager_client():
     global _secrets_manager_client
     if _secrets_manager_client is not None:
         return _secrets_manager_client
+
+    if not BOTO3_AVAILABLE:
+        logger.error("boto3 is not installed. AWS Secrets Manager is unavailable.")
+        raise ImportError("boto3 is not installed. AWS Secrets Manager is unavailable.")
 
     load_dotenv()
     region_name = os.getenv("AWS_REGION")
@@ -43,6 +53,7 @@ def get_secret_dict(secret_name: str) -> dict:
 
         _aws_secrets_cache[secret_name] = secret_dict
         logger.info(f"Successfully fetched and cached secret '{secret_name}'.")
+        print(secret_dict)
         return secret_dict
     except ClientError as e:
         logger.error(f"Failed to retrieve secret '{secret_name}' from AWS: {e}")
@@ -53,15 +64,16 @@ def get_secret_dict(secret_name: str) -> dict:
 def get_aws_secret(key_name: str, secret_name: str) -> str | None:
     try:
         secret_dict = get_secret_dict(secret_name)
+        print(secret_dict)
         return secret_dict.get(key_name)
     except ClientError:
         return None
 
 
-def get_local_secret(key_name: str) -> str:
+def get_local_secret(key_name: str, raise_error: bool = True) -> str | None:
     load_dotenv()
     value = os.getenv(key_name)
-    if not value:
+    if not value and raise_error:
         logger.error(f"Local environment variable '{key_name}' not set.")
         raise ValueError(f"Local environment variable '{key_name}' not set.")
     return value

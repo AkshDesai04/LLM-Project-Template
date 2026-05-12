@@ -25,16 +25,31 @@ class GeminiModel(LLMModels):
             # ... rest of init ...
         )
 
-    def model_response(self, module: Any, uploaded_file: Optional[Any] = None) -> Any:
+    def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         prompt = module.prompt
-        structure = module.structure
-        model = self.model_name  # Use the model set during initialization
-        top_p = module.top_p
-        top_k = module.top_k
-        temperature = module.temperature
-        reasoning_budget = module.reasoning_budget
-        response_mime_type = module.response_mime_type
-
+        structure = kwargs.get('schema') or kwargs.get('structure') or module.structure
+        base_model = kwargs.get('model', self.model_name)
+        
+        # Extract hyperparameters
+        top_p = kwargs.get('top_p', module.top_p)
+        top_k = kwargs.get('top_k', module.top_k)
+        temperature = kwargs.get('temperature', module.temperature)
+        reasoning_budget = kwargs.get('reasoning_budget') or kwargs.get('reasoning_level') or module.reasoning_budget
+        response_mime_type = kwargs.get('response_mime_type', module.response_mime_type)
+        
+        # Additional Kwargs
+        system_prompt = kwargs.get('system_prompt')
+        candidate_count = kwargs.get('candidate_count')
+        max_output_tokens = kwargs.get('max_tokens')
+        stop_sequences = kwargs.get('stop_sequences') or kwargs.get('stop')
+        if isinstance(stop_sequences, str):
+            stop_sequences = [stop_sequences]
+        presence_penalty = kwargs.get('presence_penalty')
+        frequency_penalty = kwargs.get('frequency_penalty')
+        seed = kwargs.get('seed')
+        tools = kwargs.get('tools') or kwargs.get('function')
+        safety_settings = kwargs.get('safety_settings')
+        
         # Prepare content list
         contents: List[Any] = [prompt]
         if uploaded_file:
@@ -44,8 +59,8 @@ class GeminiModel(LLMModels):
                 contents.append(uploaded_file)
 
         last_exception = None
-        max_retries = 3
-        models_to_try = [self.model_name] + self.fall_back_models
+        max_retries = kwargs.get('max_retries', 3)
+        models_to_try = [base_model] + self.fall_back_models
 
         for model in models_to_try:
             try:
@@ -78,6 +93,15 @@ class GeminiModel(LLMModels):
                         response_mime_type=response_mime_type,
                         response_schema=structure,
                         thinking_config=thinking_config_obj,
+                        system_instruction=system_prompt,
+                        candidate_count=candidate_count,
+                        max_output_tokens=max_output_tokens,
+                        stop_sequences=stop_sequences,
+                        presence_penalty=presence_penalty,
+                        frequency_penalty=frequency_penalty,
+                        seed=seed,
+                        tools=tools,
+                        safety_settings=safety_settings
                     )
 
                     start_time = time.time()

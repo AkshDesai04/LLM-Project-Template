@@ -75,3 +75,4 @@ sr,model_id,model_provider,model_type,release_date,deprication_date,input_cost_p
 74,text-embedding-3-large,OpenAI,embedding,2024-01,N/A,0.13,0,N/A,N/A,N/A
 75,text-embedding-004,Google,embedding,2024-04,N/A,0.025,0,N/A,N/A,N/A
 76,gemini-embedding-001,Google,embedding,N/A,N/A,0.15,0,0,0,0
+77,gpt-5.5-pro,OpenAI,llm,2026-03,N/A,30,180,,,
