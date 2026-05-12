@@ -64,6 +64,10 @@ class PerplexityProvider(LLMProvider):
         if search_domain_filter is not None: call_kwargs["search_domain_filter"] = search_domain_filter
         if return_citations is not None: call_kwargs["return_citations"] = return_citations
         if search_recency_filter is not None: call_kwargs["search_recency_filter"] = search_recency_filter
+        
+        if stream:
+            call_kwargs["stream"] = True
+            call_kwargs["stream_options"] = {"include_usage": True}
 
         last_exception = None
         max_retries = kwargs.get('max_retries', 3)
@@ -75,6 +79,25 @@ class PerplexityProvider(LLMProvider):
                 start_time = time.time()
 
                 response = self.client.chat.completions.create(**call_kwargs)
+
+                if stream:
+                    def stream_wrapper():
+                        for chunk in response:
+                            if getattr(chunk, 'usage', None):
+                                u = chunk.usage
+                                prompt_tokens = getattr(u, 'prompt_tokens', 0)
+                                completion_tokens = getattr(u, 'completion_tokens', 0)
+                                total_duration = time.time() - start_time
+                                
+                                try:
+                                    costs = cost_tracker.calculate_cost(model, prompt_tokens, completion_tokens)
+                                except ValueError:
+                                    costs = {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
+
+                                cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
+                                logger.info(f"Perplexity Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
+                            yield chunk
+                    return stream_wrapper()
 
                 total_duration = time.time() - start_time
                 output_content = response.choices[0].message.content

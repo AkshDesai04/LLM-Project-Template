@@ -169,7 +169,7 @@ class OllamaProvider(LLMProvider):
                 return file_bytes
 
             elif mime_type.startswith('video/'):
-                logger.info(f"Ollama does not natively support video. Extracting frames...")
+                logger.info("Ollama does not natively support video. Extracting frames...")
                 return process_video_frames(file_bytes)
 
             else:
