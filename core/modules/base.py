@@ -48,3 +48,37 @@ class Base(BaseModel):
     return_citations: bool = True
     search_domain_filter: list[str] | None = None
     search_recency_filter: str | None = None
+
+    def to_runnable(self, api_keys: dict | None = None) -> Any:
+        """
+        Converts the module configuration into a LangChain Runnable.
+        """
+        try:
+            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
+            from core.llm_models.router import ModelRouter
+        except ImportError:
+            raise ImportError("LangChain dependencies missing. Install them to use to_runnable().")
+
+        # 1. Create Prompt Template
+        messages = []
+        if self.system_prompt:
+            messages.append(("system", self.system_prompt))
+        
+        # Use simple string prompt for now, or handle variables if needed
+        messages.append(("user", self.prompt or "{input}"))
+        prompt_template = ChatPromptTemplate.from_messages(messages)
+
+        # 2. Get Model via Router
+        # We need a way to get a LangChain-compatible model from the router.
+        # For now, let's assume ModelRouter has a to_langchain_model() method.
+        router = ModelRouter(self, api_keys=api_keys)
+        model = router.to_langchain_model()
+
+        # 3. Determine Output Parser
+        if self.response_mime_type == "application/json" or self.structure:
+            parser = JsonOutputParser(pydantic_object=self.structure) if self.structure else JsonOutputParser()
+        else:
+            parser = StrOutputParser()
+
+        return prompt_template | model | parser
