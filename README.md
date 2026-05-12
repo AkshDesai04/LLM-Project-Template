@@ -136,8 +136,8 @@ Handles secret management and environment variables.
   - **Input:** `key_name` (str).
   - **Output:** `str` - The value of the environment variable.
   - **Process:** Loads `.env` file and retrieves the requested key.
-- **`get_aws_secret(key_name: str, secret_name: str = "RFP-New", region_name: str = "us-east-1")`**
-  - **Input:** `key_name` (str), `secret_name` (str, default="RFP-New"), `region_name` (str, default="us-east-1").
+- **`get_aws_secret(key_name: str, secret_name: str = "SECRET_NAME", region_name: str = "us-east-1")`**
+  - **Input:** `key_name` (str), `secret_name` (str, default="SECRET_NAME"), `region_name` (str, default="us-east-1").
   - **Output:** `Any` - The secret value.
   - **Process:** Retrieves secrets from AWS Secrets Manager using credentials found in the local environment.
 
