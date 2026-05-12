@@ -36,6 +36,35 @@ PyPDF2==3.0.1
 
 # doc ops
 markitdown==0.1.5
+markitdown-ocr==0.1.0
+pymupdf==1.27.2.3
+python-docx==1.2.0
+beautifulsoup4==4.14.3
+mammoth==1.11.0
+markdownify==1.2.2
+openpyxl==3.1.5
+pdfminer.six==20251230
+python-pptx==1.0.2
+youtube-transcript-api==1.0.3
+pdfplumber==0.11.9
+azure-ai-documentintelligence==1.0.2
+azure-identity==1.25.3
+pydub==0.25.1
+speechrecognition==3.16.1
+xlrd==2.0.2
+xlsxwriter==3.2.9
+pandas==3.0.3
+lxml==6.1.0
+pillow==12.2.0
+pypdfium2==5.8.0
+msal==1.36.0
+msal-extensions==1.3.1
+azure-core==1.41.0
+pyjwt==2.12.1
+isodate==0.7.2
+cobble==0.1.4
+et-xmlfile==2.0.0
+olefile==0.47
 
 
 # ============================================
