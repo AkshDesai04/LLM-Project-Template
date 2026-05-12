@@ -1,5 +1,6 @@
 import os
 import atexit
+import time
 from typing import Optional, Dict
 
 from utils.logger import get_logger
@@ -185,3 +186,52 @@ class CostTracker:
 
 # Export the singleton instance explicitly
 cost_tracker = CostTracker()
+
+try:
+    from langchain_core.callbacks import BaseCallbackHandler
+    from langchain_core.outputs import LLMResult
+
+    class LangChainCostCallback(BaseCallbackHandler):
+        """
+        LangChain callback handler that hooks into the global CostTracker.
+        """
+        def __init__(self, cost_tracker_instance: CostTracker):
+            self.cost_tracker = cost_tracker_instance
+            self.start_times = {}
+
+        def on_llm_start(self, serialized: dict, prompts: list, **kwargs) -> None:
+            run_id = kwargs.get("run_id")
+            self.start_times[run_id] = time.time()
+
+        def on_llm_end(self, response: LLMResult, **kwargs) -> None:
+            run_id = kwargs.get("run_id")
+            duration = time.time() - self.start_times.pop(run_id, time.time())
+            
+            model_name = response.llm_output.get("model_name") or "unknown"
+            
+            for generation_list in response.generations:
+                for generation in generation_list:
+                    usage = getattr(generation, "generation_info", {}).get("token_usage", {})
+                    if not usage and response.llm_output:
+                        usage = response.llm_output.get("token_usage", {})
+                    
+                    if usage:
+                        prompt_tokens = usage.get("prompt_tokens", 0)
+                        completion_tokens = usage.get("completion_tokens", 0)
+                        cached_tokens = usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                        
+                        costs = self.cost_tracker.calculate_cost(
+                            model_name, prompt_tokens, completion_tokens, cached_tokens
+                        )
+                        self.cost_tracker.record_transaction(
+                            "LangChainFlow", model_name, costs, duration
+                        )
+
+    # Factory for the callback
+    def get_langchain_callback():
+        return LangChainCostCallback(cost_tracker)
+
+except ImportError:
+    def get_langchain_callback():
+        logger.warning("langchain-core not installed. Callback unavailable.")
+        return None
