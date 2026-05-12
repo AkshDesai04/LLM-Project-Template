@@ -37,7 +37,7 @@ def get_logger(name: str, level: int = logging.INFO) -> logging.Logger:
             os.makedirs(log_dir, exist_ok=True)
 
             date_str = datetime.now().strftime("%Y%m%d")
-            log_file = os.path.join(log_dir, f"rfp_ai_{date_str}.log")
+            log_file = os.path.join(log_dir, f"logs_{date_str}.log")
 
             file_handler = logging.FileHandler(log_file)
             file_handler.setFormatter(JsonFormatter())
