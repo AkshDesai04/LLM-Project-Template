@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from openai import OpenAI
 
 from utils.logger import get_logger
+from utils.env_ops import get_local_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
 from ..utils.media_utils import (
@@ -19,7 +20,8 @@ logger = get_logger("OpenAIProvider")
 
 
 class OpenAIProvider(LLMProvider):
-    def __init__(self, api_key: str, base: BaseModule):
+    def __init__(self, api_key: Optional[str], base: BaseModule):
+        api_key = api_key or get_local_secret("OPEN_AI_KEY")
         super().__init__(api_key, base)
         self.client = OpenAI(api_key=api_key)
 

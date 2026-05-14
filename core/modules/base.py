@@ -49,7 +49,7 @@ class Base(BaseModel):
     search_domain_filter: list[str] | None = None
     search_recency_filter: str | None = None
 
-    def to_runnable(self, api_keys: dict | None = None) -> Any:
+    def to_runnable(self) -> Any:
         """
         Converts the module configuration into a LangChain Runnable.
         """
@@ -72,7 +72,7 @@ class Base(BaseModel):
         # 2. Get Model via Router
         # We need a way to get a LangChain-compatible model from the router.
         # For now, let's assume ModelRouter has a to_langchain_model() method.
-        router = ModelRouter(self, api_keys=api_keys)
+        router = ModelRouter(self)
         model = router.to_langchain_model()
 
         # 3. Determine Output Parser

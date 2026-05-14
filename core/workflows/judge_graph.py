@@ -17,7 +17,6 @@ class GraphState(TypedDict):
     judge_result: JudgeResult
     iterations: int
     max_iterations: int
-    api_keys: dict
 
 def generate_node(state: GraphState):
     """
@@ -36,7 +35,7 @@ def generate_node(state: GraphState):
         prompt_with_feedback = state['input_prompt']
     
     module = TempModule(prompt=prompt_with_feedback)
-    router = ModelRouter(module, api_keys=state['api_keys'])
+    router = ModelRouter(module)
     response = router.model_response(module)
     
     return {
@@ -55,7 +54,7 @@ def judge_node(state: GraphState):
     class DummyModule(BaseModule):
         model: str = "gemini-2.0-flash" # Standard judge model
 
-    router = ModelRouter(DummyModule(), api_keys=state['api_keys'])
+    router = ModelRouter(DummyModule())
     judge_result = router.evaluate_response(state['input_prompt'], state['generation'])
     
     logger.info(f"Judge Score: {judge_result.score}/10")
@@ -103,8 +102,6 @@ def create_judge_graph():
 
 if __name__ == "__main__":
     # Example usage
-    from utils.env_ops import get_keys_dict
-    
     app = create_judge_graph()
     
     initial_state = {
@@ -112,8 +109,7 @@ if __name__ == "__main__":
         "generation": "",
         "judge_result": None,
         "iterations": 0,
-        "max_iterations": 3,
-        "api_keys": get_keys_dict()
+        "max_iterations": 3
     }
     
     # Run the graph

@@ -2,6 +2,7 @@ import time
 from typing import Any, Optional, List, Union
 
 from utils.logger import get_logger
+from utils.env_ops import get_local_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
 from core.modules.base import Base as BaseModule
@@ -14,7 +15,8 @@ except ImportError:
 logger = get_logger("PerplexityProvider")
 
 class PerplexityProvider(LLMProvider):
-    def __init__(self, api_key: str, base: BaseModule):
+    def __init__(self, api_key: Optional[str], base: BaseModule):
+        api_key = api_key or get_local_secret("PERPLEXITY_KEY")
         super().__init__(api_key, base)
         if OpenAI:
             self.client = OpenAI(api_key=api_key, base_url="https://api.perplexity.ai")

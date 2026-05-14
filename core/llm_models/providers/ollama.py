@@ -16,11 +16,12 @@ from core.modules.base import Base as BaseModule
 logger = get_logger("OllamaProvider")
 
 class OllamaProvider(LLMProvider):
-    def __init__(self, api_key: str, base: BaseModule):
+    def __init__(self, api_key: Optional[str], base: BaseModule):
         """
         api_key is not strictly required for Ollama but kept for interface consistency.
-        OLLAMA_URL should be set in .env.
+        OLLAMA_URL and OLLAMA_KEY should be set in .env if needed.
         """
+        api_key = api_key or get_local_secret("OLLAMA_KEY", raise_error=False) or "local-key"
         super().__init__(api_key, base)
         ollama_url = get_local_secret("OLLAMA_URL", raise_error=False) or "http://localhost:11434"
         logger.info(f"Initializing Ollama client with host: {ollama_url}")

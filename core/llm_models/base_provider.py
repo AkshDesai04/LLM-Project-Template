@@ -16,7 +16,7 @@ class JudgeResult(BaseModel):
     improvements: Optional[str] = Field(None, description="Suggestions for improving the response.")
 
 class LLMProvider(ABC):
-    def __init__(self, api_key: str, base_config: BaseModule):
+    def __init__(self, api_key: Optional[str], base_config: BaseModule):
         self.api_key = api_key
         self.model_name = base_config.model
         self.temperature = base_config.temperature
