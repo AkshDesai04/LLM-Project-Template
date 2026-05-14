@@ -8,7 +8,7 @@ from .base_provider import LLMProvider, JudgeResult
 logger = get_logger("ModelRouter")
 
 class ModelRouter:
-    def __init__(self, module: BaseModule, api_keys: Optional[dict] = None, fallback_index: int = 0):
+    def __init__(self, module: BaseModule, fallback_index: int = 0):
         model_name = ""
         if fallback_index == 0:
             model_name = module.model
@@ -39,40 +39,20 @@ class ModelRouter:
         
         # Lazy load providers to avoid importing SDKs if not needed
         if provider == 'google':
-            api_key = get_local_secret("GEMINI_KEY", raise_error=False)
-            if not api_key and api_keys:
-                api_key = api_keys.get("GEMINI_KEY")
-            
-            if not api_key:
-                raise ValueError("Provider is 'google', but GEMINI_KEY not in .env or api_keys.")
             from .providers.gemini import GeminiProvider
-            self.model_instance = GeminiProvider(api_key, LLMProvider.prepare_module(module_for_init))
+            self.model_instance = GeminiProvider(None, LLMProvider.prepare_module(module_for_init))
             
         elif provider == 'openai':
-            api_key = get_local_secret("OPEN_AI_KEY", raise_error=False)
-            if not api_key and api_keys:
-                api_key = api_keys.get("OPEN_AI_KEY")
-
-            if not api_key:
-                raise ValueError("Provider is 'openai', but OPEN_AI_KEY not in .env or api_keys.")
             from .providers.openai import OpenAIProvider
-            self.model_instance = OpenAIProvider(api_key, LLMProvider.prepare_module(module_for_init))
+            self.model_instance = OpenAIProvider(None, LLMProvider.prepare_module(module_for_init))
             
         elif provider == 'perplexity':
-            api_key = get_local_secret("PERPLEXITY_KEY", raise_error=False)
-            if not api_key and api_keys:
-                api_key = api_keys.get("PERPLEXITY_KEY")
-
-            if not api_key:
-                raise ValueError("Provider is 'perplexity', but PERPLEXITY_KEY not in .env or api_keys.")
             from .providers.perplexity import PerplexityProvider
-            self.model_instance = PerplexityProvider(api_key, LLMProvider.prepare_module(module_for_init))
+            self.model_instance = PerplexityProvider(None, LLMProvider.prepare_module(module_for_init))
             
         elif provider == 'ollama':
-            # Ollama usually doesn't need an API key, but we'll use a placeholder if not provided
-            api_key = get_local_secret("OLLAMA_KEY", raise_error=False) or "local-key"
             from .providers.ollama import OllamaProvider
-            self.model_instance = OllamaProvider(api_key, LLMProvider.prepare_module(module_for_init))
+            self.model_instance = OllamaProvider(None, LLMProvider.prepare_module(module_for_init))
             
         else:
             raise ValueError(f"Unsupported provider: '{provider}'")
