@@ -88,10 +88,16 @@ class OllamaProvider(LLMProvider):
 
         last_exception = None
         max_retries = kwargs.get('max_retries', 3)
+        pull_attempted = False
         
         format_param = None
-        if structure:
+        response_mime_type = kwargs.get('response_mime_type', getattr(module, 'response_mime_type', self.response_mime_type))
+        if structure or response_mime_type == "application/json":
             format_param = 'json'
+
+        if stream and structure:
+            logger.warning("Streaming is not supported with structured output in Ollama. Disabling streaming.")
+            stream = False
 
         logger.info(f"Attempting generation with model: {model} (Ollama)")
         for attempt in range(max_retries):
@@ -150,6 +156,24 @@ class OllamaProvider(LLMProvider):
                             continue
                 
                 return output_content
+
+            except ollama.ResponseError as e:
+                last_exception = e
+                if e.status_code == 404 and 'not found' in str(e).lower() and not pull_attempted:
+                    logger.info(f"Model '{model}' not found locally. Attempting to pull from Ollama Hub...")
+                    pull_attempted = True
+                    try:
+                        logger.info(f"Pulling '{model}'. This may take a while...")
+                        self.client.pull(model)
+                        logger.info(f"Successfully pulled model '{model}'. Retrying generation...")
+                        continue
+                    except Exception as pull_error:
+                        logger.error(f"Failed to pull model '{model}': {pull_error}")
+                        last_exception = pull_error
+                        break
+                else:
+                    logger.warning(f"Ollama response failed on attempt {attempt + 1} for model {model}: {e}")
+                    time.sleep(2)
 
             except Exception as e:
                 last_exception = e

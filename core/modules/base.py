@@ -22,7 +22,8 @@ class Base(BaseModel):
     top_p: float = 0.8
     top_k: int = 40
     max_tokens: int | None = None
-    reasoning_budget: int | Literal["low", "medium", "high"] | None = None
+    reasoning_budget: int | Literal["low", "medium", "high", "xhigh"] | None = None
+    return_reasoning: bool = False
 
     # Penalties & Sampling
     presence_penalty: float = 0.0
