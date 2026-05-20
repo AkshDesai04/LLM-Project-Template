@@ -2,6 +2,7 @@ import os
 from typing import Optional, Any, Union, List, Iterator
 from markitdown import MarkItDown
 from utils.logger import get_logger
+from urllib.parse import urlparse
 
 try:
     from langchain_core.document_loaders import BaseLoader
@@ -107,6 +108,14 @@ class MarkItDownUtils(BaseLoader):
             The converted Markdown content.
         """
         try:
+            parsed_url = urlparse(url)
+            # Block internal, private, or loopback IPs/hostnames
+            if parsed_url.hostname in ['localhost', '127.0.0.1', '169.254.169.254'] or parsed_url.hostname.startswith(
+                    '10.'):
+                raise ValueError("Invalid or restricted URL provided.")
+            if parsed_url.scheme not in ['http', 'https']:
+                raise ValueError("Only HTTP/HTTPS protocols are allowed.")
+
             logger.info(f"Converting URL: {url}")
             result = self.md.convert_url(url)
             return result.text_content

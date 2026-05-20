@@ -26,6 +26,10 @@ def process_video_frames(video_bytes: bytes, frames_per_second: int = 1) -> List
     """
     Extracts frames from video bytes, encodes them, and returns a list of dictionaries formatted for OpenAI.
     """
+    MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB limit
+    if len(video_bytes) > MAX_FILE_SIZE:
+        raise ValueError("Video file exceeds the maximum allowed size of 50MB.")
+
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
     temp_file.write(video_bytes)
     temp_file.close()
