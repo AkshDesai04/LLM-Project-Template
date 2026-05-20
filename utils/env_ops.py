@@ -53,7 +53,6 @@ def get_secret_dict(secret_name: str) -> dict:
 
         _aws_secrets_cache[secret_name] = secret_dict
         logger.info(f"Successfully fetched and cached secret '{secret_name}'.")
-        print(secret_dict)
         return secret_dict
     except ClientError as e:
         logger.error(f"Failed to retrieve secret '{secret_name}' from AWS: {e}")
@@ -64,7 +63,6 @@ def get_secret_dict(secret_name: str) -> dict:
 def get_aws_secret(key_name: str, secret_name: str) -> str | None:
     try:
         secret_dict = get_secret_dict(secret_name)
-        print(secret_dict)
         return secret_dict.get(key_name)
     except ClientError:
         return None
