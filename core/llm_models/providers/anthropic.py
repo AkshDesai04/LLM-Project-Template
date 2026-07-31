@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from anthropic import Anthropic
 
 from utils.logger import get_logger
-from utils.env_ops import get_local_secret
+from utils.env_ops import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
 from ..utils.media_utils import (
@@ -38,7 +38,7 @@ STRUCTURED_TOOL_NAME = "emit_structured_response"
 
 class AnthropicProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
-        api_key = api_key or get_local_secret("ANTHROPIC_KEY")
+        api_key = api_key or get_secret("ANTHROPIC_KEY")
         super().__init__(api_key, base)
         self.client = Anthropic(api_key=api_key)
 

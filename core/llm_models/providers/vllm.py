@@ -6,7 +6,7 @@ from typing import Optional, List, Any, Union
 from pydantic import BaseModel
 
 from utils.logger import get_logger
-from utils.env_ops import get_local_secret
+from utils.env_ops import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
 from ..utils.media_utils import (
@@ -39,10 +39,10 @@ class VLLMProvider(LLMProvider):
         if OpenAI is None:
             raise ImportError("OpenAI package required for vLLM routing. Run `pip install openai`")
 
-        api_key = api_key or get_local_secret("VLLM_KEY", raise_error=False) or PLACEHOLDER_API_KEY
+        api_key = api_key or get_secret("VLLM_KEY", raise_error=False) or PLACEHOLDER_API_KEY
         super().__init__(api_key, base)
 
-        self.base_url = get_local_secret("VLLM_URL", raise_error=False) or DEFAULT_VLLM_URL
+        self.base_url = get_secret("VLLM_URL", raise_error=False) or DEFAULT_VLLM_URL
         logger.info(f"Initializing vLLM client with base URL: {self.base_url}")
         self.client = OpenAI(api_key=api_key, base_url=self.base_url)
 

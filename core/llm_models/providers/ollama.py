@@ -7,7 +7,7 @@ import ollama
 from ollama import Client
 
 from utils.logger import get_logger
-from utils.env_ops import get_local_secret
+from utils.env_ops import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
 from ..utils.media_utils import extract_text_from_pdf_bytes, process_video_frames
@@ -21,9 +21,9 @@ class OllamaProvider(LLMProvider):
         api_key is not strictly required for Ollama but kept for interface consistency.
         OLLAMA_URL and OLLAMA_KEY should be set in .env if needed.
         """
-        api_key = api_key or get_local_secret("OLLAMA_KEY", raise_error=False) or "local-key"
+        api_key = api_key or get_secret("OLLAMA_KEY", raise_error=False) or "local-key"
         super().__init__(api_key, base)
-        ollama_url = get_local_secret("OLLAMA_URL", raise_error=False) or "http://localhost:11434"
+        ollama_url = get_secret("OLLAMA_URL", raise_error=False) or "http://localhost:11434"
         logger.info(f"Initializing Ollama client with host: {ollama_url}")
         self.client = Client(host=ollama_url)
 

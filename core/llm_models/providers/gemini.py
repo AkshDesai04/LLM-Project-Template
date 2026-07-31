@@ -8,13 +8,13 @@ from google.genai.types import ThinkingLevel
 
 from utils.logger import get_logger
 from utils.env_ops import (
-    get_local_secret,
-    get_gemini_auth_mode,
+    get_secret,
+    get_gemini_key_type,
     load_gemini_service_account_credentials,
     resolve_gemini_project,
     resolve_gemini_location,
-    GEMINI_AUTH_MODE_API_KEY,
-    GEMINI_AUTH_MODE_SERVICE_ACCOUNT,
+    GEMINI_KEY_TYPE_API_KEY,
+    GEMINI_KEY_TYPE_SERVICE_ACC_JSON,
     GEMINI_API_KEY_NAME,
 )
 from ..base_provider import LLMProvider, JudgeResult
@@ -25,15 +25,14 @@ logger = get_logger("GeminiProvider")
 
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
-        auth_mode = get_gemini_auth_mode()
-        self.auth_mode = auth_mode
-        self.uses_vertex = auth_mode == GEMINI_AUTH_MODE_SERVICE_ACCOUNT
+        key_type = get_gemini_key_type()
+        self.key_type = key_type
+        self.uses_vertex = key_type == GEMINI_KEY_TYPE_SERVICE_ACC_JSON
 
         # LLMProvider stores self.api_key; for Vertex we keep a sentinel rather
         # than the service-account JSON itself.
-        resolved_key = api_key
-        if auth_mode == GEMINI_AUTH_MODE_API_KEY:
-            resolved_key = api_key or get_local_secret(GEMINI_API_KEY_NAME)
+        if key_type == GEMINI_KEY_TYPE_API_KEY:
+            resolved_key = api_key or get_secret(GEMINI_API_KEY_NAME)
         else:
             resolved_key = api_key or "vertex-service-account"
 
@@ -42,13 +41,14 @@ class GeminiProvider(LLMProvider):
 
     def _build_client(self, api_key: Optional[str]):
         """
-        Builds a google-genai Client for the auth mode selected in .env.
+        Builds a google-genai Client for the credential type set by
+        GEMINI_KEY_TYPE in .env.
 
-        api_key  -> Gemini Developer API (client.files.upload available)
-        service_account -> Vertex AI (inline Parts; Files API unavailable)
+        GEMINI_KEY       -> Gemini Developer API (client.files.upload available)
+        SERVICE_ACC_JSON -> Vertex AI (inline Parts; Files API unavailable)
         """
-        if self.auth_mode == GEMINI_AUTH_MODE_API_KEY:
-            key = api_key or get_local_secret(GEMINI_API_KEY_NAME)
+        if self.key_type == GEMINI_KEY_TYPE_API_KEY:
+            key = api_key or get_secret(GEMINI_API_KEY_NAME)
             logger.info("Initializing Gemini client with API key auth.")
             return genai.Client(api_key=key)
 
