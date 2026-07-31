@@ -16,26 +16,47 @@ logger = get_logger("EnvOps")
 GEMINI_API_KEY_NAME = "GEMINI_KEY"
 OPENAI_API_KEY_NAME = "OPEN_AI_KEY"
 
-# Gemini auth selection. Stored in .env so the user can flip between the
-# Developer API key and a Vertex AI service account without code changes.
-GEMINI_AUTH_MODE_NAME = "GEMINI_AUTH_MODE"
+# Where runtime secrets are fetched from. LOCAL reads .env, AWS_SM reads the
+# bundle named by SECRET_NAME out of AWS Secrets Manager.
+KEY_LOCATION_NAME = "KEY_LOCATION"
+KEY_LOCATION_LOCAL = "LOCAL"
+KEY_LOCATION_AWS_SM = "AWS_SM"
+VALID_KEY_LOCATIONS = (KEY_LOCATION_LOCAL, KEY_LOCATION_AWS_SM)
+
+SECRET_NAME_KEY = "SECRET_NAME"
+
+# Gemini credential selection: the Developer API key or a Vertex AI
+# service-account JSON.
+GEMINI_KEY_TYPE_NAME = "GEMINI_KEY_TYPE"
+GEMINI_KEY_TYPE_API_KEY = "GEMINI_KEY"
+GEMINI_KEY_TYPE_SERVICE_ACC_JSON = "SERVICE_ACC_JSON"
+VALID_GEMINI_KEY_TYPES = (GEMINI_KEY_TYPE_API_KEY, GEMINI_KEY_TYPE_SERVICE_ACC_JSON)
+
 GEMINI_SERVICE_ACCOUNT_FILE_NAME = "GEMINI_SERVICE_ACCOUNT_FILE"
 GEMINI_SERVICE_ACCOUNT_JSON_NAME = "GEMINI_SERVICE_ACCOUNT_JSON"
 GEMINI_PROJECT_NAME = "GEMINI_PROJECT"
 GEMINI_LOCATION_NAME = "GEMINI_LOCATION"
-
-GEMINI_AUTH_MODE_API_KEY = "api_key"
-GEMINI_AUTH_MODE_SERVICE_ACCOUNT = "service_account"
-VALID_GEMINI_AUTH_MODES = {
-    GEMINI_AUTH_MODE_API_KEY,
-    GEMINI_AUTH_MODE_SERVICE_ACCOUNT,
-}
 
 # Vertex AI cloud-platform scope required by the Generative AI APIs.
 GEMINI_SERVICE_ACCOUNT_SCOPES = (
     "https://www.googleapis.com/auth/cloud-platform",
 )
 DEFAULT_GEMINI_LOCATION = "us-central1"
+
+# Credentials that follow KEY_LOCATION. Everything else (mode switches,
+# project ids, regions) is deployment config and is always read from .env.
+ROUTED_SECRET_NAMES = frozenset({
+    "DATABASE_URL",
+    GEMINI_API_KEY_NAME,
+    GEMINI_SERVICE_ACCOUNT_JSON_NAME,
+    OPENAI_API_KEY_NAME,
+    "ANTHROPIC_KEY",
+    "PERPLEXITY_KEY",
+    "OLLAMA_URL",
+    "OLLAMA_KEY",
+    "VLLM_URL",
+    "VLLM_KEY",
+})
 
 _secrets_manager_client = None
 _aws_secrets_cache = {}
@@ -98,22 +119,77 @@ def get_local_secret(key_name: str, raise_error: bool = True) -> str | None:
     return value
 
 
-def get_gemini_auth_mode() -> str:
+def get_key_location() -> str:
     """
-    Reads GEMINI_AUTH_MODE from .env.
+    Reads KEY_LOCATION from .env.
 
-    Accepted values: 'api_key' (Gemini Developer API) or 'service_account'
-    (Vertex AI via a service-account JSON). Defaults to 'api_key' so existing
-    setups keep working when the variable is absent.
+    LOCAL resolves secrets through get_local_secret; AWS_SM resolves them
+    through get_aws_secret against the bundle named by SECRET_NAME. Defaults
+    to LOCAL so existing setups keep working.
     """
-    raw = get_local_secret(GEMINI_AUTH_MODE_NAME, raise_error=False) or GEMINI_AUTH_MODE_API_KEY
-    mode = raw.strip().lower()
-    if mode not in VALID_GEMINI_AUTH_MODES:
+    raw = get_local_secret(KEY_LOCATION_NAME, raise_error=False) or KEY_LOCATION_LOCAL
+    location = raw.strip().strip("'\"").upper()
+    if location not in VALID_KEY_LOCATIONS:
         raise ValueError(
-            f"Invalid {GEMINI_AUTH_MODE_NAME}='{raw}'. "
-            f"Expected one of: {', '.join(sorted(VALID_GEMINI_AUTH_MODES))}."
+            f"Invalid {KEY_LOCATION_NAME}='{raw}'. "
+            f"Expected one of: {', '.join(VALID_KEY_LOCATIONS)}."
         )
-    return mode
+    return location
+
+
+def get_secret(key_name: str, raise_error: bool = True) -> str | None:
+    """
+    Resolves a runtime secret according to KEY_LOCATION.
+
+    This is the entry point providers should use for API keys, service URLs
+    and the database URL, so that switching KEY_LOCATION moves every lookup
+    at once. SECRET_NAME itself is always read locally, since it is a pointer
+    to the bundle rather than a secret.
+    """
+    if get_key_location() == KEY_LOCATION_LOCAL:
+        return get_local_secret(key_name, raise_error=raise_error)
+
+    secret_name = get_local_secret(SECRET_NAME_KEY, raise_error=False)
+    if not secret_name:
+        message = (
+            f"{KEY_LOCATION_NAME}={KEY_LOCATION_AWS_SM} requires {SECRET_NAME_KEY} "
+            f"in .env to identify the AWS Secrets Manager bundle."
+        )
+        logger.error(message)
+        if raise_error:
+            raise ValueError(message)
+        return None
+
+    value = get_aws_secret(key_name, secret_name)
+    if not value:
+        message = f"Secret '{key_name}' not found in AWS secret '{secret_name}'."
+        logger.error(message)
+        if raise_error:
+            raise ValueError(message)
+        return None
+    return value
+
+
+def get_database_url(raise_error: bool = True) -> str | None:
+    """Resolves DATABASE_URL through KEY_LOCATION."""
+    return get_secret("DATABASE_URL", raise_error=raise_error)
+
+
+def get_gemini_key_type() -> str:
+    """
+    Reads GEMINI_KEY_TYPE from .env.
+
+    GEMINI_KEY uses the Gemini Developer API key; SERVICE_ACC_JSON uses a
+    Vertex AI service-account JSON. Defaults to GEMINI_KEY.
+    """
+    raw = get_local_secret(GEMINI_KEY_TYPE_NAME, raise_error=False) or GEMINI_KEY_TYPE_API_KEY
+    key_type = raw.strip().strip("'\"").upper()
+    if key_type not in VALID_GEMINI_KEY_TYPES:
+        raise ValueError(
+            f"Invalid {GEMINI_KEY_TYPE_NAME}='{raw}'. "
+            f"Expected one of: {', '.join(VALID_GEMINI_KEY_TYPES)}."
+        )
+    return key_type
 
 
 def load_gemini_service_account_credentials():
@@ -128,10 +204,12 @@ def load_gemini_service_account_credentials():
         from google.oauth2 import service_account
     except ImportError as e:
         raise ImportError(
-            "google-auth is required for GEMINI_AUTH_MODE=service_account. "
-            "Run `pip install google-auth`."
+            f"google-auth is required for {GEMINI_KEY_TYPE_NAME}="
+            f"{GEMINI_KEY_TYPE_SERVICE_ACC_JSON}. Run `pip install google-auth`."
         ) from e
 
+    # The path is deployment config, so it is always read locally; the JSON
+    # body itself is a secret and follows KEY_LOCATION.
     file_path = get_local_secret(GEMINI_SERVICE_ACCOUNT_FILE_NAME, raise_error=False)
     if file_path:
         resolved = os.path.expanduser(file_path.strip().strip("'\""))
@@ -145,7 +223,7 @@ def load_gemini_service_account_credentials():
             scopes=list(GEMINI_SERVICE_ACCOUNT_SCOPES),
         )
 
-    inline_json = get_local_secret(GEMINI_SERVICE_ACCOUNT_JSON_NAME, raise_error=False)
+    inline_json = get_secret(GEMINI_SERVICE_ACCOUNT_JSON_NAME, raise_error=False)
     if inline_json:
         try:
             info = json.loads(inline_json)
@@ -160,9 +238,9 @@ def load_gemini_service_account_credentials():
         )
 
     raise ValueError(
-        f"{GEMINI_AUTH_MODE_NAME}={GEMINI_AUTH_MODE_SERVICE_ACCOUNT} requires either "
+        f"{GEMINI_KEY_TYPE_NAME}={GEMINI_KEY_TYPE_SERVICE_ACC_JSON} requires either "
         f"{GEMINI_SERVICE_ACCOUNT_FILE_NAME} (path) or "
-        f"{GEMINI_SERVICE_ACCOUNT_JSON_NAME} (inline JSON) in .env."
+        f"{GEMINI_SERVICE_ACCOUNT_JSON_NAME} (inline JSON)."
     )
 
 
@@ -180,7 +258,7 @@ def resolve_gemini_project(credentials=None) -> str:
     )
     if not project:
         raise ValueError(
-            f"{GEMINI_AUTH_MODE_NAME}={GEMINI_AUTH_MODE_SERVICE_ACCOUNT} requires a GCP "
+            f"{GEMINI_KEY_TYPE_NAME}={GEMINI_KEY_TYPE_SERVICE_ACC_JSON} requires a GCP "
             f"project. Set {GEMINI_PROJECT_NAME} (or GOOGLE_CLOUD_PROJECT) in .env, "
             f"or use a service-account JSON that includes project_id."
         )
@@ -207,7 +285,7 @@ def get_keys_dict() -> dict:
         return _api_keys_dict
 
     try:
-        secret_name = get_local_secret("SECRET_NAME")
+        secret_name = get_local_secret(SECRET_NAME_KEY)
         logger.info(f"Loading LLM API keys from AWS secret: '{secret_name}'")
         all_keys = get_secret_dict(secret_name)
 
