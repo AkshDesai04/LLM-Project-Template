@@ -24,6 +24,9 @@ class CostTracker:
         self._total_output_cost = 0.0
         self._total_cached_cost = 0.0
         self._total_overall_cost = 0.0
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
+        self._total_cached_tokens = 0
         self._summary_printed = False
 
         # Load pricing dynamically
@@ -121,18 +124,61 @@ class CostTracker:
             "total_cost": input_cost + output_cost + cached_cost,
         }
 
-    def record_transaction(self, module_name: str, model_name: str, costs: dict, duration: float):
+    def record_transaction(
+        self,
+        module_name: str,
+        model_name: str,
+        costs: dict,
+        duration: float,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cached_tokens: int = 0,
+        status: str = "success",
+    ):
         """Records a single transaction and updates global metrics."""
         self._call_history.append({
             "module": module_name,
             "model": model_name,
             "duration": duration,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cached_tokens": cached_tokens,
+            "status": status,
             **costs
         })
-        self._total_input_cost += costs["input_cost"]
-        self._total_output_cost += costs["output_cost"]
-        self._total_cached_cost += costs["cached_cost"]
-        self._total_overall_cost += costs["total_cost"]
+        if status == "success":
+            self._total_input_cost += costs["input_cost"]
+            self._total_output_cost += costs["output_cost"]
+            self._total_cached_cost += costs["cached_cost"]
+            self._total_overall_cost += costs["total_cost"]
+            self._total_input_tokens += input_tokens
+            self._total_output_tokens += output_tokens
+            self._total_cached_tokens += cached_tokens
+
+    def record_failed_attempt(
+        self,
+        module_name: str,
+        model_name: str,
+        duration: float,
+        error: Optional[Exception] = None,
+    ):
+        """Records a failed model attempt with zero tokens and zero cost."""
+        self._call_history.append({
+            "module": module_name,
+            "model": model_name,
+            "duration": duration,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_tokens": 0,
+            "status": "failed",
+            "input_cost": 0.0,
+            "output_cost": 0.0,
+            "cached_cost": 0.0,
+            "total_cost": 0.0,
+            "error": str(error) if error else None,
+        })
+        if error:
+            logger.warning(f"Recorded failed attempt for model '{model_name}': {error}")
 
     def print_final_summary(self):
         """Prints itemized transactions and consolidated session costs cleanly on program exit."""
@@ -141,34 +187,60 @@ class CostTracker:
 
         self._summary_printed = True
 
-        print("\n" + "=" * 132)
+        table_width = 168
+        print("\n" + "=" * table_width)
         print("ITEMIZED TRANSACTION PRICING SUMMARY (NEW ARCHITECTURE)")
-        print("=" * 132)
-        print(f"{'SR.':<4} | {'MODULE':<22} | {'MODEL':<25} | {'WALL TIME':<12} | {'INPUT':<12} | {'OUTPUT':<12} | {'CACHED':<12} | {'TOTAL':<12}")
-        print("-" * 132)
-        
+        print("=" * table_width)
+        print(
+            f"{'SR.':<4} | {'MODULE':<22} | {'MODEL':<32} | {'WALL TIME':<12} | "
+            f"{'IN TOK':<8} | {'OUT TOK':<8} | {'CACHE TOK':<9} | "
+            f"{'INPUT':<12} | {'OUTPUT':<12} | {'CACHED':<12} | {'TOTAL':<12}"
+        )
+        print("-" * table_width)
+
         for i, call in enumerate(self._call_history, 1):
-            print(f"{i:<4} | {call['module']:<22} | {call['model']:<25} | "
-                  f"{call['duration']:<11.2f}s | "
-                  f"${call['input_cost']:<11.6f} | ${call['output_cost']:<11.6f} | "
-                  f"${call['cached_cost']:<11.6f} | ${call['total_cost']:<11.6f}")
+            model_label = call['model']
+            if call.get('status') == 'failed':
+                model_label = f"{call['model']} (failed)"
 
-        print("-" * 132)
-        
+            print(
+                f"{i:<4} | {call['module']:<22} | {model_label:<32} | "
+                f"{call['duration']:<11.2f}s | "
+                f"{call.get('input_tokens', 0):<8} | {call.get('output_tokens', 0):<8} | "
+                f"{call.get('cached_tokens', 0):<9} | "
+                f"${call['input_cost']:<11.6f} | ${call['output_cost']:<11.6f} | "
+                f"${call['cached_cost']:<11.6f} | ${call['total_cost']:<11.6f}"
+            )
+
+        print("-" * table_width)
+
+        successful_calls = [c for c in self._call_history if c.get('status') != 'failed']
         num_calls = len(self._call_history)
+        num_successful = len(successful_calls) or 1
         avg_duration = sum(c['duration'] for c in self._call_history) / num_calls
-        print(f"{'':<4} | {'AVERAGE':<22} | {'':<25} | "
-              f"{avg_duration:<11.2f}s | "
-              f"${(self._total_input_cost / num_calls):<11.6f} | ${(self._total_output_cost / num_calls):<11.6f} | "
-              f"${(self._total_cached_cost / num_calls):<11.6f} | ${(self._total_overall_cost / num_calls):<11.6f}")
+        print(
+            f"{'':<4} | {'AVERAGE':<22} | {'':<32} | "
+            f"{avg_duration:<11.2f}s | "
+            f"{(self._total_input_tokens / num_successful):<8.1f} | "
+            f"{(self._total_output_tokens / num_successful):<8.1f} | "
+            f"{(self._total_cached_tokens / num_successful):<9.1f} | "
+            f"${(self._total_input_cost / num_successful):<11.6f} | "
+            f"${(self._total_output_cost / num_successful):<11.6f} | "
+            f"${(self._total_cached_cost / num_successful):<11.6f} | "
+            f"${(self._total_overall_cost / num_successful):<11.6f}"
+        )
 
-        print("-" * 132)
+        print("-" * table_width)
         total_duration = sum(c['duration'] for c in self._call_history)
-        print(f"{'':<4} | {'TOTALS':<22} | {'':<25} | "
-              f"{total_duration:<11.2f}s | "
-              f"${self._total_input_cost:<11.6f} | ${self._total_output_cost:<11.6f} | "
-              f"${self._total_cached_cost:<11.6f} | ${self._total_overall_cost:<11.6f}")
-        print("=" * 132 + "\n")
+        print(
+            f"{'':<4} | {'TOTALS':<22} | {'':<32} | "
+            f"{total_duration:<11.2f}s | "
+            f"{self._total_input_tokens:<8} | {self._total_output_tokens:<8} | "
+            f"{self._total_cached_tokens:<9} | "
+            f"${self._total_input_cost:<11.6f} | ${self._total_output_cost:<11.6f} | "
+            f"${self._total_cached_cost:<11.6f} | ${self._total_overall_cost:<11.6f}"
+        )
+        print("=" * table_width + "\n")
 
         try:
             logger.info({"session_history": self._call_history})
@@ -178,6 +250,9 @@ class CostTracker:
                     "output_cost": self._total_output_cost,
                     "cached_cost": self._total_cached_cost,
                     "overall_cost": self._total_overall_cost,
+                    "input_tokens": self._total_input_tokens,
+                    "output_tokens": self._total_output_tokens,
+                    "cached_tokens": self._total_cached_tokens,
                     "overall_duration": total_duration
                 }
             })
@@ -224,7 +299,13 @@ try:
                             model_name, prompt_tokens, completion_tokens, cached_tokens
                         )
                         self.cost_tracker.record_transaction(
-                            "LangChainFlow", model_name, costs, duration
+                            "LangChainFlow",
+                            model_name,
+                            costs,
+                            duration,
+                            input_tokens=prompt_tokens,
+                            output_tokens=completion_tokens,
+                            cached_tokens=cached_tokens,
                         )
 
     # Factory for the callback
