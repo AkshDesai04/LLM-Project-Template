@@ -4,6 +4,7 @@ from typing import Optional, Dict
 
 from utils.logger import get_logger
 from utils.file_ops import read_csv
+from .model_names import strip_provider_prefix
 
 logger = get_logger("CostTracker")
 
@@ -73,6 +74,9 @@ class CostTracker:
 
     def calculate_cost(self, model_name: str, prompt_tokens: int, output_tokens: int, cached_tokens: int = 0) -> dict:
         """Calculates estimated cost based on token counts, including tiered pricing thresholds."""
+        # Pricing rows are keyed by the bare model id, so tolerate a caller that
+        # passes the canonical "provider/model" form.
+        model_name = strip_provider_prefix(model_name)
         rates = self.pricing.get(model_name)
 
         if not rates:
@@ -89,7 +93,11 @@ class CostTracker:
                 )
 
         if not rates:
-            logger.warning(f"No pricing information found for model '{model_name}'. Cost will be $0.00.")
+            logger.warning(
+                f"No pricing row for model '{model_name}'; it will be reported at "
+                f"$0.00. The call itself is unaffected. Add a row to "
+                f"assets/model_pricing.csv to track its cost."
+            )
             return {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
 
         tier_threshold = 200_000

@@ -5,11 +5,10 @@ from utils.logger import get_logger
 from core.modules.base import Base as BaseModule
 from .base_provider import LLMProvider, JudgeResult
 from .cost_tracker import cost_tracker
+from .model_names import PROVIDER_ALIASES, split_model_name
 
 logger = get_logger("ModelRouter")
 
-# Prefixes that only select a provider and are stripped before the call is made.
-ROUTING_PREFIXES = ("ollama/", "vllm/")
 
 class ModelRouter:
     def __init__(self, module: BaseModule, fallback_index: int = 0):
@@ -44,12 +43,10 @@ class ModelRouter:
     @staticmethod
     def strip_routing_prefix(model_name: str) -> str:
         """
-        Removes a routing-only prefix, e.g. 'ollama/llama3.2:1b' -> 'llama3.2:1b'
-        and 'vllm/meta-llama/Llama-3.1-8B' -> 'meta-llama/Llama-3.1-8B'.
+        Removes the provider prefix so the SDK and the cost tracker both see the
+        real model id, e.g. 'gemini/gemini-2.5-flash' -> 'gemini-2.5-flash'.
         """
-        if model_name.lower().startswith(ROUTING_PREFIXES):
-            return model_name.split("/", 1)[1]
-        return model_name
+        return split_model_name(model_name)[1]
 
     def _build_provider(self, model_name: str, module: BaseModule) -> LLMProvider:
         """Constructs the correct LLMProvider for a given model name."""
@@ -88,32 +85,51 @@ class ModelRouter:
 
     @staticmethod
     def get_provider_by_model_name(model_name: str) -> str:
-        """Determines the model provider based on the model name prefix."""
-        model_name_lower = model_name.lower()
-        if model_name_lower.startswith("vllm/"):
-            return "vllm"
-        if model_name_lower.startswith("ollama/"):
-            return "ollama"
-        if model_name_lower.startswith("gpt"):
-            return "openai"
-        elif model_name_lower.startswith("gemini"):
-            return "google"
-        elif model_name_lower.startswith(("claude", "anthropic")):
-            return "anthropic"
-        elif model_name_lower.startswith(("o1", "o3", "gpt-5")):
-            return "openai"
-        elif model_name_lower.startswith(("sonar", "perplexity")):
-            return "perplexity"
-        elif model_name_lower.startswith(("ollama", "mistral", "phi", "qwen")):
-            return "ollama"
-        elif model_name_lower.startswith("llama"):
-            # Default llama to perplexity for backward compatibility,
-            # unless it's explicitly prefixed with ollama elsewhere.
-            return "perplexity"
+        """Resolves the provider from the 'provider/model' prefix."""
+        provider, _ = split_model_name(model_name)
+        if provider:
+            return provider
 
-        raise ValueError(f"Could not determine provider for model '{model_name}'. "
-                         f"Model name should start with 'gpt', 'gemini', 'claude', 'sonar', "
-                         f"'ollama/', or 'vllm/'.")
+        return ModelRouter._infer_provider_from_bare_name(model_name)
+
+    @staticmethod
+    def _infer_provider_from_bare_name(model_name: str) -> str:
+        """
+        Guesses the provider for a name written without a prefix.
+
+        Kept so existing module configs keep working, but it cannot recognise a
+        model family it has never heard of, which is exactly what the explicit
+        prefix solves.
+        """
+        model_name_lower = model_name.lower()
+
+        if model_name_lower.startswith(("gpt", "o1", "o3", "o4")):
+            provider = "openai"
+        elif model_name_lower.startswith("gemini"):
+            provider = "google"
+        elif model_name_lower.startswith(("claude", "anthropic")):
+            provider = "anthropic"
+        elif model_name_lower.startswith(("sonar", "perplexity")):
+            provider = "perplexity"
+        elif model_name_lower.startswith(("mistral", "phi", "qwen")):
+            provider = "ollama"
+        elif model_name_lower.startswith("llama"):
+            # Ambiguous between Perplexity and Ollama; kept on Perplexity for
+            # backward compatibility.
+            provider = "perplexity"
+        else:
+            raise ValueError(
+                f"Could not determine provider for model '{model_name}'. "
+                f"Prefix the model with its provider, e.g. "
+                f"'gemini/{model_name}'. Valid prefixes: "
+                f"{', '.join(sorted(PROVIDER_ALIASES))}."
+            )
+
+        logger.warning(
+            f"Model '{model_name}' has no provider prefix; inferred '{provider}'. "
+            f"Prefer the explicit form '{provider}/{model_name}'."
+        )
+        return provider
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         # If the caller explicitly overrides the model, skip the fallback chain
@@ -140,7 +156,11 @@ class ModelRouter:
             except Exception as e:
                 duration = time.time() - start_time
                 last_exception = e
-                cost_tracker.record_failed_attempt(module_name, model_name, duration, error=e)
+                # Record the stripped name so a failed row matches the id a
+                # successful row on the same model would be recorded under.
+                cost_tracker.record_failed_attempt(
+                    module_name, self.strip_routing_prefix(model_name), duration, error=e
+                )
                 logger.warning(
                     f"Model '{model_name}' failed after {duration:.2f}s; "
                     f"trying next fallback if available. Error: {e}"
