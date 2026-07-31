@@ -22,6 +22,7 @@ pydantic==2.12.5
 google-genai==1.62.0
 #google-auth==2.35.0
 openai>=1.58.1,<2.0.0
+anthropic==0.120.2
 ollama==0.6.2
 perplexityai==0.30.1
 httpx==0.28.1

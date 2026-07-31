@@ -61,6 +61,10 @@ class ModelRouter:
             from .providers.openai import OpenAIProvider
             return OpenAIProvider(None, LLMProvider.prepare_module(module_for_init))
 
+        if provider == 'anthropic':
+            from .providers.anthropic import AnthropicProvider
+            return AnthropicProvider(None, LLMProvider.prepare_module(module_for_init))
+
         if provider == 'perplexity':
             from .providers.perplexity import PerplexityProvider
             return PerplexityProvider(None, LLMProvider.prepare_module(module_for_init))
@@ -81,6 +85,8 @@ class ModelRouter:
             return "openai"
         elif model_name_lower.startswith("gemini"):
             return "google"
+        elif model_name_lower.startswith(("claude", "anthropic")):
+            return "anthropic"
         elif model_name_lower.startswith(("o1", "o3", "gpt-5")):
             return "openai"
         elif model_name_lower.startswith(("sonar", "perplexity")):
@@ -93,7 +99,7 @@ class ModelRouter:
             return "perplexity"
 
         raise ValueError(f"Could not determine provider for model '{model_name}'. "
-                         f"Model name should start with 'gpt', 'gemini', 'sonar', or 'ollama'.")
+                         f"Model name should start with 'gpt', 'gemini', 'claude', 'sonar', or 'ollama'.")
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         if 'model' in kwargs:

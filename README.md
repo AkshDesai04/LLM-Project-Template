@@ -3,7 +3,7 @@ This project is a template.
 # LLM-Project-Template
 
 ## Overview
-This repository serves as a modular template for building applications that integrate with Large Language Models (LLMs) like Google Gemini, OpenAI, Ollama, and Perplexity. It includes robust utilities for logging, parallel execution, environment management, and document processing via MarkItDown.
+This repository serves as a modular template for building applications that integrate with Large Language Models (LLMs) like Google Gemini, OpenAI, Anthropic, Ollama, and Perplexity. It includes robust utilities for logging, parallel execution, environment management, and document processing via MarkItDown.
 
 ---
 
@@ -68,8 +68,8 @@ Unified entry point for dynamic model selection and routing across multiple LLM 
   - **Process:** Walks the model chain. On each failure, records a zero-token failed attempt via `CostTracker` and tries the next fallback (including cross-provider fallbacks). Raises if the entire chain fails.
 - **`get_provider_by_model_name(model_name: str) -> str` (static)**
   - **Input:** `model_name` (str).
-  - **Output:** `str` - Provider name (e.g., "openai", "google", "ollama", "perplexity").
-  - **Process:** Routes requests by matching model string prefixes.
+  - **Output:** `str` - Provider name (e.g., "openai", "google", "anthropic", "ollama", "perplexity").
+  - **Process:** Routes requests by matching model string prefixes (`gpt`/`o1`/`o3`, `gemini`, `claude`, `sonar`, `ollama/`).
 
 ---
 
@@ -96,6 +96,19 @@ Implementation of the OpenAI LLM provider.
   - **Process:** Extracts text from PDFs locally, encodes image bytes to base64 dictionaries, and slices video frames for the Vision API since standard chat doesn't utilize robust persistent external files.
 - **`embed_content(...)`**
   - **Process:** Generates embeddings utilizing OpenAI's `text-embedding-3-small`.
+
+---
+
+### File: `core/llm_models/providers/anthropic.py`
+Implementation of the Anthropic (Claude) LLM provider.
+
+#### Class: `AnthropicProvider` (LLMProvider)
+- **`model_response(...)`**
+  - **Process:** Calls the Messages API. Supplies the mandatory `max_tokens` (defaulting to 4096), passes the system prompt as a top-level `system` argument rather than a message, and converts the OpenAI-shaped media payloads from `media_utils` into Anthropic image blocks. Structured output is enforced by forcing a single tool call built from the Pydantic schema, since Anthropic has no JSON response format. A string `reasoning_budget` maps onto the `effort` scale, while an integer budget enables extended thinking with `temperature=1`.
+- **`upload_media(...)`**
+  - **Process:** Extracts PDF text locally, base64-encodes images, and slices video into frames, matching the OpenAI provider.
+- **`embed_content(...)`**
+  - **Process:** Not implemented; Anthropic exposes no embeddings API.
 
 ---
 
