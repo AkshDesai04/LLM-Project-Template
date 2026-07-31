@@ -76,10 +76,17 @@ class CostTracker:
         rates = self.pricing.get(model_name)
 
         if not rates:
-            for key in self.pricing:
-                if key in model_name:
-                    rates = self.pricing[key]
-                    break
+            # Fall back to the most specific matching key. Taking the first match
+            # instead would let a short id shadow a longer one that shares its
+            # prefix, e.g. 'gpt-5' capturing 'gpt-5.5-pro-2026-01-15'.
+            matches = [key for key in self.pricing if key in model_name]
+            if matches:
+                best_match = max(matches, key=len)
+                rates = self.pricing[best_match]
+                logger.info(
+                    f"No exact pricing row for '{model_name}'; "
+                    f"using the closest match '{best_match}'."
+                )
 
         if not rates:
             logger.warning(f"No pricing information found for model '{model_name}'. Cost will be $0.00.")
