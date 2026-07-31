@@ -7,7 +7,16 @@ from google.genai import types
 from google.genai.types import ThinkingLevel
 
 from utils.logger import get_logger
-from utils.env_ops import get_local_secret
+from utils.env_ops import (
+    get_local_secret,
+    get_gemini_auth_mode,
+    load_gemini_service_account_credentials,
+    resolve_gemini_project,
+    resolve_gemini_location,
+    GEMINI_AUTH_MODE_API_KEY,
+    GEMINI_AUTH_MODE_SERVICE_ACCOUNT,
+    GEMINI_API_KEY_NAME,
+)
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
 from core.modules.base import Base as BaseModule
@@ -16,9 +25,46 @@ logger = get_logger("GeminiProvider")
 
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
-        api_key = api_key or get_local_secret("GEMINI_KEY")
-        super().__init__(api_key, base)
-        self.client = genai.Client(api_key=api_key)
+        auth_mode = get_gemini_auth_mode()
+        self.auth_mode = auth_mode
+        self.uses_vertex = auth_mode == GEMINI_AUTH_MODE_SERVICE_ACCOUNT
+
+        # LLMProvider stores self.api_key; for Vertex we keep a sentinel rather
+        # than the service-account JSON itself.
+        resolved_key = api_key
+        if auth_mode == GEMINI_AUTH_MODE_API_KEY:
+            resolved_key = api_key or get_local_secret(GEMINI_API_KEY_NAME)
+        else:
+            resolved_key = api_key or "vertex-service-account"
+
+        super().__init__(resolved_key, base)
+        self.client = self._build_client(api_key)
+
+    def _build_client(self, api_key: Optional[str]):
+        """
+        Builds a google-genai Client for the auth mode selected in .env.
+
+        api_key  -> Gemini Developer API (client.files.upload available)
+        service_account -> Vertex AI (inline Parts; Files API unavailable)
+        """
+        if self.auth_mode == GEMINI_AUTH_MODE_API_KEY:
+            key = api_key or get_local_secret(GEMINI_API_KEY_NAME)
+            logger.info("Initializing Gemini client with API key auth.")
+            return genai.Client(api_key=key)
+
+        credentials = load_gemini_service_account_credentials()
+        project = resolve_gemini_project(credentials)
+        location = resolve_gemini_location()
+        logger.info(
+            f"Initializing Gemini client with Vertex AI service-account auth "
+            f"(project={project}, location={location})."
+        )
+        return genai.Client(
+            vertexai=True,
+            project=project,
+            location=location,
+            credentials=credentials,
+        )
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         prompt = getattr(module, 'prompt', "")
@@ -155,8 +201,17 @@ class GeminiProvider(LLMProvider):
             f"Failed to get response from Gemini model {model} after {max_retries} attempts."
         ) from last_exception
 
-    def upload_media(self, file_bytes: bytes, mime_type: str) -> types.File:
+    def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:
         try:
+            # Vertex AI rejects the Developer Files API. Inline the bytes as a
+            # Part so callers keep the same upload_media -> model_response flow.
+            if self.uses_vertex:
+                logger.info(
+                    f"Inlining {mime_type} as a Part for Vertex AI "
+                    f"(Files API is unavailable under service-account auth)."
+                )
+                return types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+
             logger.info(f"Uploading {mime_type} to Gemini...")
             file_obj = BytesIO(file_bytes)
             file_obj.seek(0)
