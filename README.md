@@ -79,10 +79,11 @@ Unified entry point for dynamic model selection and routing across multiple LLM 
 Implementation of the Google Gemini LLM provider.
 
 #### Class: `GeminiProvider` (LLMProvider)
+Auth mode is selected by `GEMINI_AUTH_MODE` in `.env` (`api_key` or `service_account`). `api_key` talks to the Gemini Developer API with `GEMINI_KEY`. `service_account` talks to Vertex AI using a service-account JSON (`GEMINI_SERVICE_ACCOUNT_FILE` or `GEMINI_SERVICE_ACCOUNT_JSON`) plus `GEMINI_PROJECT` / `GEMINI_LOCATION`.
 - **`model_response(...)`**
   - **Process:** Sends prompts/files to Gemini using the `google-genai` SDK. Supports advanced parameters, reasoning budgets via `ThinkingConfig`, structured JSON output, native file caching metadata, and streaming generators.
 - **`upload_media(...)`**
-  - **Process:** Uploads bytes natively to Gemini's File API, utilizing a polling loop to verify the file is active before proceeding.
+  - **Process:** Under `api_key` mode, uploads bytes to Gemini's File API and polls until active. Under `service_account` mode, Vertex rejects that Files API, so the bytes are inlined as a `types.Part` instead.
 - **`embed_content(...)`**
   - **Process:** Generates embeddings utilizing `gemini-embedding-001`.
 
@@ -176,6 +177,9 @@ General utility functions for environment management, file handling, multi-threa
 ### File: `utils/env_ops.py`
 Handles secret management and environment variables natively or via AWS.
 - **`get_local_secret(key_name: str)`**: Reads directly from `.env`.
+- **`get_gemini_auth_mode()`**: Reads `GEMINI_AUTH_MODE` (`api_key` | `service_account`), defaulting to `api_key`.
+- **`load_gemini_service_account_credentials()`**: Builds Vertex credentials from `GEMINI_SERVICE_ACCOUNT_FILE` or inline `GEMINI_SERVICE_ACCOUNT_JSON`.
+- **`resolve_gemini_project()` / `resolve_gemini_location()`**: Resolve the Vertex project and region with fallbacks to the standard `GOOGLE_CLOUD_*` variables.
 - **`get_secret_dict(secret_name: str)`**: Fetches a bulk dictionary of configuration from AWS Secrets Manager utilizing memory caching via `boto3`.
 - **`get_keys_dict()`**: Orchestrates global keys seamlessly.
 
