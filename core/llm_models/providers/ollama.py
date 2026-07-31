@@ -121,7 +121,15 @@ class OllamaProvider(LLMProvider):
                                 completion_tokens = chunk.get('eval_count', 0)
                                 total_duration = time.time() - start_time
                                 costs = cost_tracker.calculate_cost(model, prompt_tokens, completion_tokens)
-                                cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
+                                cost_tracker.record_transaction(
+                                    type(module).__name__,
+                                    model,
+                                    costs,
+                                    total_duration,
+                                    input_tokens=prompt_tokens,
+                                    output_tokens=completion_tokens,
+                                    cached_tokens=0,
+                                )
                                 logger.info(f"Ollama Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
                             yield chunk
                     return stream_wrapper()
@@ -140,7 +148,15 @@ class OllamaProvider(LLMProvider):
                 completion_tokens = response.get('eval_count', 0)
                 
                 costs = cost_tracker.calculate_cost(model, prompt_tokens, completion_tokens)
-                cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
+                cost_tracker.record_transaction(
+                    type(module).__name__,
+                    model,
+                    costs,
+                    total_duration,
+                    input_tokens=prompt_tokens,
+                    output_tokens=completion_tokens,
+                    cached_tokens=0,
+                )
                 logger.info(f"Ollama Transaction Recorded: ${costs['total_cost']:.6f} total cost")
                 
                 if structure:
@@ -219,7 +235,15 @@ class OllamaProvider(LLMProvider):
             total_duration = time.time() - start_time
             
             costs = cost_tracker.calculate_cost(model, 0, 0)
-            cost_tracker.record_transaction("Embedding", model, costs, total_duration)
+            cost_tracker.record_transaction(
+                "Embedding",
+                model,
+                costs,
+                total_duration,
+                input_tokens=0,
+                output_tokens=0,
+                cached_tokens=0,
+            )
             
             if isinstance(text, str):
                 return embeddings[0]

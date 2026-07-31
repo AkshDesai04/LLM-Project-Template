@@ -96,7 +96,15 @@ class PerplexityProvider(LLMProvider):
                                 except ValueError:
                                     costs = {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
 
-                                cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
+                                cost_tracker.record_transaction(
+                                    type(module).__name__,
+                                    model,
+                                    costs,
+                                    total_duration,
+                                    input_tokens=prompt_tokens,
+                                    output_tokens=completion_tokens,
+                                    cached_tokens=0,
+                                )
                                 logger.info(f"Perplexity Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
                             yield chunk
                     return stream_wrapper()
@@ -114,7 +122,15 @@ class PerplexityProvider(LLMProvider):
                     except ValueError:
                         costs = {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
 
-                    cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
+                    cost_tracker.record_transaction(
+                        type(module).__name__,
+                        model,
+                        costs,
+                        total_duration,
+                        input_tokens=prompt_tokens,
+                        output_tokens=completion_tokens,
+                        cached_tokens=0,
+                    )
 
                 return output_content
 

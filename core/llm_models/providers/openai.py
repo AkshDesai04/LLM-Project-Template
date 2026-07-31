@@ -421,7 +421,10 @@ class OpenAIProvider(LLMProvider):
                                                 type(module).__name__,
                                                 model,
                                                 costs,
-                                                total_duration
+                                                total_duration,
+                                                input_tokens=prompt_tokens,
+                                                output_tokens=completion_tokens,
+                                                cached_tokens=cached_tokens,
                                             )
 
                                             logger.info(
@@ -491,7 +494,10 @@ class OpenAIProvider(LLMProvider):
                         type(module).__name__,
                         model,
                         costs,
-                        total_duration
+                        total_duration,
+                        input_tokens=prompt_tokens,
+                        output_tokens=completion_tokens,
+                        cached_tokens=cached_tokens,
                     )
 
                     logger.info(
@@ -578,7 +584,10 @@ class OpenAIProvider(LLMProvider):
                     "Embedding",
                     model,
                     costs,
-                    total_duration
+                    total_duration,
+                    input_tokens=prompt_tokens,
+                    output_tokens=0,
+                    cached_tokens=0,
                 )
 
             if isinstance(text, str):
