@@ -48,11 +48,13 @@ Singleton utility for centralized tracking and calculation of API usage costs.
   - **Input:** `model_name` (str), `prompt_tokens` (int), `output_tokens` (int), `cached_tokens` (int, default=0).
   - **Output:** `dict` - Calculated costs for input, output, cached tokens, and the total.
   - **Process:** Matches the model name against pricing data and computes estimated costs based on token usage, including >200k token tier thresholds.
-- **`record_transaction(self, module_name: str, model_name: str, costs: dict, duration: float)`**
-  - **Input:** `module_name` (str), `model_name` (str), `costs` (dict), `duration` (float).
-  - **Process:** Appends transaction details to the global history and updates overall session metrics.
+- **`record_transaction(self, module_name: str, model_name: str, costs: dict, duration: float, input_tokens: int = 0, output_tokens: int = 0, cached_tokens: int = 0, status: str = "success")`**
+  - **Input:** `module_name` (str), `model_name` (str), `costs` (dict), `duration` (float), token counts, and optional `status`.
+  - **Process:** Appends transaction details (including token counts and status) to the global history and updates overall session metrics for successful calls.
+- **`record_failed_attempt(self, module_name: str, model_name: str, duration: float, error: Optional[Exception] = None)`**
+  - **Process:** Appends a zero-token, zero-cost row with `status="failed"` so failed primary/fallback models appear in the summary without inflating totals.
 - **`print_final_summary(self)`**
-  - **Process:** Registered via `atexit`. Prints a detailed, itemized tabular summary of all session costs and execution times upon script exit, and logs the full history as JSON.
+  - **Process:** Registered via `atexit`. Prints a detailed, itemized tabular summary of all session costs, token counts, and execution times upon script exit (labeling failed models as `model (failed)`), and logs the full history as JSON.
 
 ---
 
@@ -60,8 +62,10 @@ Singleton utility for centralized tracking and calculation of API usage costs.
 Unified entry point for dynamic model selection and routing across multiple LLM backends.
 
 #### Class: `ModelRouter`
-- **`__init__(self, module: BaseModule, api_keys: Optional[dict] = None, fallback_index: int = 0)`**
-  - **Process:** Resolves the intended model name (handling fallback arrays), identifies the necessary provider, lazily imports the respective provider's class, and initializes the `LLMProvider` instance.
+- **`__init__(self, module: BaseModule, fallback_index: int = 0)`**
+  - **Process:** Builds an order-preserving model chain from `module.model` + `module.fallback_models` (starting at `fallback_index`), identifies the necessary provider for the primary model, lazily imports the respective provider's class, and initializes the `LLMProvider` instance.
+- **`model_response(...)`**
+  - **Process:** Walks the model chain. On each failure, records a zero-token failed attempt via `CostTracker` and tries the next fallback (including cross-provider fallbacks). Raises if the entire chain fails.
 - **`get_provider_by_model_name(model_name: str) -> str` (static)**
   - **Input:** `model_name` (str).
   - **Output:** `str` - Provider name (e.g., "openai", "google", "ollama", "perplexity").
@@ -128,7 +132,7 @@ Defines the standard configuration schema for application modules using Pydantic
 
 #### Class: `Base` (BaseModel)
 - **Core Parameters:** `prompt`, `system_prompt`, `structure`.
-- **Model Parameters:** `model` (default `"gemini-2.5-pro"`), `fallback_models`.
+- **Model Parameters:** `model` (default `"gemini-2.5-pro"`), `fallback_models` (consumed by `ModelRouter`, not by individual providers).
 - **Generation:** `temperature`, `top_p`, `top_k`, `max_tokens`, `reasoning_budget`.
 - **Sampling:** `presence_penalty`, `frequency_penalty`, `seed`, `stop_sequences`.
 - **Provider Features:** `response_mime_type`, `stream`, `logprobs`, `service_tier`, `tools`, `candidate_count`.

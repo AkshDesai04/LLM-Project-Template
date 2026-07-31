@@ -20,7 +20,7 @@ Defines the `Base` class, which extends Pydantic's `BaseModel`. This is the stan
     *   `system_prompt` (str): Broad system guidelines injected dynamically.
     *   `structure` (Any): Optional Pydantic model enforcing a structured JSON output.
     *   `model` (str): The primary model identifier (e.g., `"gemini-2.5-pro"`).
-    *   `fallback_models` (list[str]): Alternative models to systematically attempt if the primary fails.
+    *   `fallback_models` (list[str]): Alternative models attempted by `ModelRouter` if the primary fails. Defined only on module configs under `core/modules/`; providers never hardcode fallback names.
     *   `temperature`, `top_p`, `top_k`, `max_tokens`: Standard LLM generation parameters.
     *   `reasoning_budget` (int | str): Controls deep thinking parameters native to advanced reasoning models (`o1`, `o3`, `gpt-5`, Gemini Thinking modes).
     *   `stream` (bool): Configures the model to dispatch chunked iterative generators instead of static single completions.
@@ -41,14 +41,15 @@ Contains the abstract base class `LLMProvider` that all provider-specific implem
 
 ### `core/llm_models/cost_tracker.py`
 Singleton class defining the `CostTracker`. Calculates and stores multi-call metrics seamlessly.
-*   *Flow:* Upon completion generation, models transmit usage tokens to the `calculate_cost` logic mapping tier thresholds natively. Subsequent valid queries map to the global dictionary via `record_transaction`.
-*   **`print_final_summary()`:** Hooks to the `atexit` garbage collector natively executing and logging deep tabular CLI metric layouts detailing every processed transaction upon code termination. Captures overarching application performance cleanly to JSON telemetry files dynamically.
+*   *Flow:* Upon completion generation, models transmit usage tokens to the `calculate_cost` logic mapping tier thresholds natively. Subsequent valid queries map to the global dictionary via `record_transaction` (including token counts). Failed primary/fallback attempts are recorded via `record_failed_attempt` as zero-token, zero-cost rows with `status="failed"`.
+*   **`print_final_summary()`:** Hooks to the `atexit` garbage collector natively executing and logging deep tabular CLI metric layouts detailing every processed transaction (tokens + costs, with failed models labeled `model (failed)`) upon code termination. Captures overarching application performance cleanly to JSON telemetry files dynamically.
 
 ### `core/llm_models/router.py`
 The unified factory entry point (`ModelRouter`). It abstracts the provider selection process. **IMPORTANT: When calling an LLM, you must default to using `ModelRouter`. Direct instantiation of provider-specific files should be avoided.**
 *   **Key Functions & Flow:**
     *   **`get_provider_by_model_name()`:** Scans model name prefixes dynamically categorizing routing constraints (`ollama/`, `gemini`, `gpt`, `sonar`) targeting local instances, Google, OpenAI, or Perplexity natively.
-    *   **Initialization & Lazy Loading:** Only initializes the specific requisite module avoiding bloat and missing API key errors. Retrieves keys contextually through local `.env` definitions mapping them into the abstracted `LLMProvider`.
+    *   **Initialization & Lazy Loading:** Builds the model chain from `module.model` + `module.fallback_models`. Only initializes the specific requisite module avoiding bloat and missing API key errors. Retrieves keys contextually through local `.env` definitions mapping them into the abstracted `LLMProvider`.
+    *   **Fallback Chain:** `model_response` walks the chain across providers. Each failed model is recorded as a zero-token `(failed)` row before the next fallback is attempted.
     *   **Proxy Methods:** Exposes core tasks cleanly bridging execution transparently without altering API interactions.
 
 ### `core/llm_models/providers/`
