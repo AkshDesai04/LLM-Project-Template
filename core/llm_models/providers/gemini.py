@@ -23,7 +23,7 @@ class GeminiProvider(LLMProvider):
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         prompt = getattr(module, 'prompt', "")
         structure = kwargs.get('schema') or kwargs.get('structure') or getattr(module, 'structure', None)
-        base_model = kwargs.get('model', self.model_name)
+        model = kwargs.get('model', self.model_name)
         
         top_p = kwargs.get('top_p', getattr(module, 'top_p', self.top_p))
         top_k = kwargs.get('top_k', getattr(module, 'top_k', self.top_k))
@@ -53,100 +53,107 @@ class GeminiProvider(LLMProvider):
 
         last_exception = None
         max_retries = kwargs.get('max_retries', 3)
-        fallbacks = self.fall_back_models or []
-        models_to_try = [base_model] + fallbacks
 
-        for model in models_to_try:
+        logger.info(f"Attempting generation with model: {model}")
+        for attempt in range(max_retries):
             try:
-                cost_tracker.calculate_cost(model, 0, 0)
-            except ValueError as e:
-                logger.warning(f"Skipping model {model} due to pricing check: {e}")
-                last_exception = e
-                continue
+                logger.info(f"Attempt {attempt + 1}/{max_retries} for model {model}")
 
-            logger.info(f"Attempting generation with model: {model}")
-            for attempt in range(max_retries):
-                try:
-                    logger.info(f"Attempt {attempt + 1}/{max_retries} for model {model}")
+                thinking_config_obj = None
+                if reasoning_budget:
+                    if isinstance(reasoning_budget, str):
+                        reasoning = ThinkingLevel(reasoning_budget)
+                        thinking_config_obj = types.ThinkingConfig(include_thoughts=True, thinking_level=reasoning)
+                    else:
+                        thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
 
-                    thinking_config_obj = None
-                    if reasoning_budget:
-                        if isinstance(reasoning_budget, str):
-                            reasoning = ThinkingLevel(reasoning_budget)
-                            thinking_config_obj = types.ThinkingConfig(include_thoughts=True, thinking_level=reasoning)
-                        else:
-                            thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
+                config = types.GenerateContentConfig(
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    response_mime_type=response_mime_type,
+                    response_schema=structure,
+                    thinking_config=thinking_config_obj,
+                    system_instruction=system_prompt,
+                    candidate_count=candidate_count,
+                    max_output_tokens=max_output_tokens,
+                    stop_sequences=stop_sequences,
+                    presence_penalty=presence_penalty,
+                    frequency_penalty=frequency_penalty,
+                    seed=seed,
+                    tools=tools,
+                    safety_settings=safety_settings
+                )
 
-                    config = types.GenerateContentConfig(
-                        temperature=temperature,
-                        top_p=top_p,
-                        top_k=top_k,
-                        response_mime_type=response_mime_type,
-                        response_schema=structure,
-                        thinking_config=thinking_config_obj,
-                        system_instruction=system_prompt,
-                        candidate_count=candidate_count,
-                        max_output_tokens=max_output_tokens,
-                        stop_sequences=stop_sequences,
-                        presence_penalty=presence_penalty,
-                        frequency_penalty=frequency_penalty,
-                        seed=seed,
-                        tools=tools,
-                        safety_settings=safety_settings
+                start_time = time.time()
+                if stream:
+                    response_stream = self.client.models.generate_content_stream(model=model, contents=contents, config=config)
+                    
+                    def stream_wrapper():
+                        for chunk in response_stream:
+                            if chunk.usage_metadata:
+                                u = chunk.usage_metadata
+                                def get_val(obj, attr): return getattr(obj, attr, 0) or 0
+                                
+                                prompt_tokens = get_val(u, 'prompt_token_count')
+                                candidate_tokens = get_val(u, 'candidates_token_count')
+                                cached_tokens = get_val(u, 'cached_content_token_count')
+
+                                total_duration = time.time() - start_time
+                                costs = cost_tracker.calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
+                                cost_tracker.record_transaction(
+                                    type(module).__name__,
+                                    model,
+                                    costs,
+                                    total_duration,
+                                    input_tokens=prompt_tokens,
+                                    output_tokens=candidate_tokens,
+                                    cached_tokens=cached_tokens,
+                                )
+                                logger.info(f"Gemini Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
+                            yield chunk
+                    return stream_wrapper()
+
+                response = self.client.models.generate_content(model=model, contents=contents, config=config)
+                total_duration = time.time() - start_time
+
+                if not response.text and not getattr(response, 'parsed', None):
+                    raise ValueError("Received an empty response from Gemini.")
+
+                if response.usage_metadata:
+                    u = response.usage_metadata
+                    def get_val(obj, attr): return getattr(obj, attr, 0) or 0
+                    
+                    prompt_tokens = get_val(u, 'prompt_token_count')
+                    candidate_tokens = get_val(u, 'candidates_token_count')
+                    cached_tokens = get_val(u, 'cached_content_token_count')
+
+                    costs = cost_tracker.calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
+                    cost_tracker.record_transaction(
+                        type(module).__name__,
+                        model,
+                        costs,
+                        total_duration,
+                        input_tokens=prompt_tokens,
+                        output_tokens=candidate_tokens,
+                        cached_tokens=cached_tokens,
                     )
 
-                    start_time = time.time()
-                    if stream:
-                        response_stream = self.client.models.generate_content_stream(model=model, contents=contents, config=config)
-                        
-                        def stream_wrapper():
-                            for chunk in response_stream:
-                                if chunk.usage_metadata:
-                                    u = chunk.usage_metadata
-                                    def get_val(obj, attr): return getattr(obj, attr, 0) or 0
-                                    
-                                    prompt_tokens = get_val(u, 'prompt_token_count')
-                                    candidate_tokens = get_val(u, 'candidates_token_count')
-                                    cached_tokens = get_val(u, 'cached_content_token_count')
+                    logger.info(f"Gemini Transaction Recorded: ${costs['total_cost']:.6f} total cost")
 
-                                    total_duration = time.time() - start_time
-                                    costs = cost_tracker.calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
-                                    cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
-                                    logger.info(f"Gemini Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
-                                yield chunk
-                        return stream_wrapper()
+                if structure:
+                    return response.parsed
+                return response.text
 
-                    response = self.client.models.generate_content(model=model, contents=contents, config=config)
-                    total_duration = time.time() - start_time
+            except Exception as e:
+                last_exception = e
+                logger.warning(f"Gemini response failed on attempt {attempt + 1} for model {model}: {e}")
+                time.sleep(2)
+                continue
 
-                    if not response.text and not getattr(response, 'parsed', None):
-                        raise ValueError("Received an empty response from Gemini.")
-
-                    if response.usage_metadata:
-                        u = response.usage_metadata
-                        def get_val(obj, attr): return getattr(obj, attr, 0) or 0
-                        
-                        prompt_tokens = get_val(u, 'prompt_token_count')
-                        candidate_tokens = get_val(u, 'candidates_token_count')
-                        cached_tokens = get_val(u, 'cached_content_token_count')
-
-                        costs = cost_tracker.calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
-                        cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
-
-                        logger.info(f"Gemini Transaction Recorded: ${costs['total_cost']:.6f} total cost")
-
-                    if structure:
-                        return response.parsed
-                    return response.text
-
-                except Exception as e:
-                    last_exception = e
-                    logger.warning(f"Gemini response failed on attempt {attempt + 1} for model {model}: {e}")
-                    time.sleep(2)
-                    continue
-            break 
-
-        raise RuntimeError("Failed to get response from Gemini after trying all specified models.") from last_exception
+        raise RuntimeError(
+            f"Failed to get response from Gemini model {model} after {max_retries} attempts."
+        ) from last_exception
 
     def upload_media(self, file_bytes: bytes, mime_type: str) -> types.File:
         try:
@@ -196,7 +203,15 @@ class GeminiProvider(LLMProvider):
 
             if prompt_tokens > 0:
                 costs = cost_tracker.calculate_cost(model, prompt_tokens, 0, 0)
-                cost_tracker.record_transaction("Embedding", model, costs, total_duration)
+                cost_tracker.record_transaction(
+                    "Embedding",
+                    model,
+                    costs,
+                    total_duration,
+                    input_tokens=prompt_tokens,
+                    output_tokens=0,
+                    cached_tokens=0,
+                )
 
             if isinstance(text, str):
                 return result.embeddings[0].values

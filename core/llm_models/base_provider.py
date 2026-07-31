@@ -22,7 +22,6 @@ class LLMProvider(ABC):
         self.temperature = base_config.temperature
         self.top_p = base_config.top_p
         self.top_k = base_config.top_k
-        self.fall_back_models = getattr(base_config, 'fall_back_models', None)
         self.structure = getattr(base_config, 'structure', None)
         self.stream = getattr(base_config, 'stream', False)
         self.service_tier = getattr(base_config, 'service_tier', None)

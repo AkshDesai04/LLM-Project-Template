@@ -1,61 +1,76 @@
+import time
 from typing import Any, Optional, List, Union
 
 from utils.logger import get_logger
 from utils.env_ops import get_local_secret
 from core.modules.base import Base as BaseModule
 from .base_provider import LLMProvider, JudgeResult
+from .cost_tracker import cost_tracker
 
 logger = get_logger("ModelRouter")
 
 class ModelRouter:
     def __init__(self, module: BaseModule, fallback_index: int = 0):
-        model_name = ""
-        if fallback_index == 0:
-            model_name = module.model
-        else:
-            fall_back_models = getattr(module, 'fall_back_models', None)
-            if not fall_back_models:
-                raise ValueError("fallback_index is non-zero, but no fallback models are defined.")
-            try:
-                model_name = fall_back_models[fallback_index - 1]
-            except IndexError:
-                raise ValueError(f"Fallback index {fallback_index} is out of range.")
+        primary = module.model
+        fallbacks = getattr(module, 'fallback_models', None) or []
 
+        # Build an order-preserving, de-duplicated chain starting at fallback_index
+        raw_chain = [primary] + list(fallbacks)
+        seen = set()
+        chain = []
+        for name in raw_chain:
+            if name and name not in seen:
+                seen.add(name)
+                chain.append(name)
+
+        if fallback_index < 0 or fallback_index >= len(chain):
+            raise ValueError(f"Fallback index {fallback_index} is out of range.")
+
+        self._model_chain = chain[fallback_index:]
+        self._original_module = module
+
+        # Best-effort primary provider for proxy methods; model_response rebuilds per chain entry
+        self.model_instance: Optional[LLMProvider] = None
+        try:
+            self.model_instance = self._build_provider(self._model_chain[0], module)
+        except Exception as e:
+            logger.warning(
+                f"Could not initialize primary model '{self._model_chain[0]}' "
+                f"during router setup (will retry in model_response / fallbacks): {e}"
+            )
+
+    def _build_provider(self, model_name: str, module: BaseModule) -> LLMProvider:
+        """Constructs the correct LLMProvider for a given model name."""
         module_for_init = module.model_copy(update={'model': model_name})
-        
+
         provider = self.get_provider_by_model_name(model_name)
         model_name_lower = model_name.lower()
 
         # Strip provider prefix if present (e.g., 'ollama/llama3.2:1b' -> 'llama3.2:1b')
         if "/" in model_name:
-            # Currently only ollama/ is supported for stripping this way in this router
             if model_name_lower.startswith("ollama/"):
                 model_name = model_name.split("/", 1)[1]
                 module_for_init = module.model_copy(update={'model': model_name})
 
         logger.info(f"Routing to provider: {provider} for model '{model_name}'")
 
-        self.model_instance: LLMProvider
-        
-        # Lazy load providers to avoid importing SDKs if not needed
         if provider == 'google':
             from .providers.gemini import GeminiProvider
-            self.model_instance = GeminiProvider(None, LLMProvider.prepare_module(module_for_init))
-            
-        elif provider == 'openai':
+            return GeminiProvider(None, LLMProvider.prepare_module(module_for_init))
+
+        if provider == 'openai':
             from .providers.openai import OpenAIProvider
-            self.model_instance = OpenAIProvider(None, LLMProvider.prepare_module(module_for_init))
-            
-        elif provider == 'perplexity':
+            return OpenAIProvider(None, LLMProvider.prepare_module(module_for_init))
+
+        if provider == 'perplexity':
             from .providers.perplexity import PerplexityProvider
-            self.model_instance = PerplexityProvider(None, LLMProvider.prepare_module(module_for_init))
-            
-        elif provider == 'ollama':
+            return PerplexityProvider(None, LLMProvider.prepare_module(module_for_init))
+
+        if provider == 'ollama':
             from .providers.ollama import OllamaProvider
-            self.model_instance = OllamaProvider(None, LLMProvider.prepare_module(module_for_init))
-            
-        else:
-            raise ValueError(f"Unsupported provider: '{provider}'")
+            return OllamaProvider(None, LLMProvider.prepare_module(module_for_init))
+
+        raise ValueError(f"Unsupported provider: '{provider}'")
 
     @staticmethod
     def get_provider_by_model_name(model_name: str) -> str:
@@ -74,10 +89,10 @@ class ModelRouter:
         elif model_name_lower.startswith(("ollama", "mistral", "phi", "qwen")):
             return "ollama"
         elif model_name_lower.startswith("llama"):
-            # Default llama to perplexity for backward compatibility, 
+            # Default llama to perplexity for backward compatibility,
             # unless it's explicitly prefixed with ollama elsewhere.
             return "perplexity"
-        
+
         raise ValueError(f"Could not determine provider for model '{model_name}'. "
                          f"Model name should start with 'gpt', 'gemini', 'sonar', or 'ollama'.")
 
@@ -86,29 +101,70 @@ class ModelRouter:
             model_name = kwargs['model']
             if model_name.lower().startswith("ollama/"):
                 kwargs['model'] = model_name.split("/", 1)[1]
-        return self.model_instance.model_response(module, uploaded_file, **kwargs)
+
+        # If the caller explicitly overrides the model, skip the fallback chain
+        if 'model' in kwargs:
+            if self.model_instance is None:
+                self.model_instance = self._build_provider(kwargs['model'], self._original_module)
+            return self.model_instance.model_response(module, uploaded_file, **kwargs)
+
+        last_exception = None
+        module_name = type(module).__name__ if module is not None else type(self._original_module).__name__
+
+        for model_name in self._model_chain:
+            start_time = time.time()
+            try:
+                # Build a fresh provider for this model so cross-provider fallback works
+                provider = self._build_provider(model_name, self._original_module)
+                self.model_instance = provider
+
+                call_kwargs = {**kwargs, 'model': model_name}
+                if model_name.lower().startswith("ollama/"):
+                    call_kwargs['model'] = model_name.split("/", 1)[1]
+
+                return provider.model_response(module, uploaded_file, **call_kwargs)
+
+            except Exception as e:
+                duration = time.time() - start_time
+                last_exception = e
+                cost_tracker.record_failed_attempt(module_name, model_name, duration, error=e)
+                logger.warning(
+                    f"Model '{model_name}' failed after {duration:.2f}s; "
+                    f"trying next fallback if available. Error: {e}"
+                )
+                continue
+
+        raise RuntimeError(
+            f"Failed to get response after trying all models in chain: {self._model_chain}"
+        ) from last_exception
+
+    def _require_model_instance(self) -> LLMProvider:
+        if self.model_instance is None:
+            self.model_instance = self._build_provider(self._model_chain[0], self._original_module)
+        return self.model_instance
 
     def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:
-        return self.model_instance.upload_media(file_bytes, mime_type)
+        return self._require_model_instance().upload_media(file_bytes, mime_type)
 
     def embed_content(self, input_content: Union[str, List[str]], **kwargs) -> Union[List[float], List[List[float]]]:
-        return self.model_instance.embed_content(input_content, **kwargs)
+        return self._require_model_instance().embed_content(input_content, **kwargs)
 
     def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
-        return self.model_instance.evaluate_response(input_prompt, generated_output, rubric)
+        return self._require_model_instance().evaluate_response(input_prompt, generated_output, rubric)
 
     def to_langchain_model(self, **kwargs) -> Any:
         """
         Returns a LangChain-compatible model instance.
         """
-        provider = self.get_provider_by_model_name(self.model_instance.model_name)
-        model_name = self.model_instance.model_name
+        instance = self._require_model_instance()
+        provider = self.get_provider_by_model_name(instance.model_name)
+        model_name = instance.model_name
         
         # Common generation parameters
         gen_params = {
-            "temperature": self.model_instance.temperature,
-            "max_tokens": self.model_instance.max_tokens,
-            "top_p": self.model_instance.top_p,
+            "temperature": instance.temperature,
+            "max_tokens": instance.max_tokens,
+            "top_p": instance.top_p,
             **kwargs
         }
 
@@ -116,14 +172,14 @@ class ModelRouter:
             from langchain_openai import ChatOpenAI
             return ChatOpenAI(
                 model=model_name,
-                api_key=self.model_instance.api_key,
+                api_key=instance.api_key,
                 **gen_params
             )
         elif provider == 'google':
             from langchain_google_genai import ChatGoogleGenerativeAI
             return ChatGoogleGenerativeAI(
                 model=model_name,
-                google_api_key=self.model_instance.api_key,
+                google_api_key=instance.api_key,
                 **gen_params
             )
         elif provider == 'ollama':
@@ -139,7 +195,7 @@ class ModelRouter:
             from langchain_openai import ChatOpenAI
             return ChatOpenAI(
                 model=model_name,
-                openai_api_key=self.model_instance.api_key,
+                openai_api_key=instance.api_key,
                 openai_api_base="https://api.perplexity.ai",
                 **gen_params
             )
