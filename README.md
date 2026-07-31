@@ -79,11 +79,11 @@ Unified entry point for dynamic model selection and routing across multiple LLM 
 Implementation of the Google Gemini LLM provider.
 
 #### Class: `GeminiProvider` (LLMProvider)
-Auth mode is selected by `GEMINI_AUTH_MODE` in `.env` (`api_key` or `service_account`). `api_key` talks to the Gemini Developer API with `GEMINI_KEY`. `service_account` talks to Vertex AI using a service-account JSON (`GEMINI_SERVICE_ACCOUNT_FILE` or `GEMINI_SERVICE_ACCOUNT_JSON`) plus `GEMINI_PROJECT` / `GEMINI_LOCATION`.
+Credential type is selected by `GEMINI_KEY_TYPE` in `.env` (`GEMINI_KEY` or `SERVICE_ACC_JSON`). `GEMINI_KEY` talks to the Gemini Developer API. `SERVICE_ACC_JSON` talks to Vertex AI using a service-account JSON (`GEMINI_SERVICE_ACCOUNT_FILE` or `GEMINI_SERVICE_ACCOUNT_JSON`) plus `GEMINI_PROJECT` / `GEMINI_LOCATION`.
 - **`model_response(...)`**
   - **Process:** Sends prompts/files to Gemini using the `google-genai` SDK. Supports advanced parameters, reasoning budgets via `ThinkingConfig`, structured JSON output, native file caching metadata, and streaming generators.
 - **`upload_media(...)`**
-  - **Process:** Under `api_key` mode, uploads bytes to Gemini's File API and polls until active. Under `service_account` mode, Vertex rejects that Files API, so the bytes are inlined as a `types.Part` instead.
+  - **Process:** Under `GEMINI_KEY`, uploads bytes to Gemini's File API and polls until active. Under `SERVICE_ACC_JSON`, Vertex rejects that Files API, so the bytes are inlined as a `types.Part` instead.
 - **`embed_content(...)`**
   - **Process:** Generates embeddings utilizing `gemini-embedding-001`.
 
@@ -176,12 +176,18 @@ General utility functions for environment management, file handling, multi-threa
 
 ### File: `utils/env_ops.py`
 Handles secret management and environment variables natively or via AWS.
+- **`get_secret(key_name: str)`**: The entry point providers should use. Routes to `.env` or AWS Secrets Manager based on `KEY_LOCATION`.
+- **`get_key_location()`**: Reads `KEY_LOCATION` (`LOCAL` | `AWS_SM`), defaulting to `LOCAL`.
 - **`get_local_secret(key_name: str)`**: Reads directly from `.env`.
-- **`get_gemini_auth_mode()`**: Reads `GEMINI_AUTH_MODE` (`api_key` | `service_account`), defaulting to `api_key`.
+- **`get_aws_secret(key_name: str, secret_name: str)`**: Reads a single key out of an AWS Secrets Manager bundle.
+- **`get_database_url()`**: Convenience wrapper resolving `DATABASE_URL` through `KEY_LOCATION`.
+- **`get_gemini_key_type()`**: Reads `GEMINI_KEY_TYPE` (`GEMINI_KEY` | `SERVICE_ACC_JSON`), defaulting to `GEMINI_KEY`.
 - **`load_gemini_service_account_credentials()`**: Builds Vertex credentials from `GEMINI_SERVICE_ACCOUNT_FILE` or inline `GEMINI_SERVICE_ACCOUNT_JSON`.
 - **`resolve_gemini_project()` / `resolve_gemini_location()`**: Resolve the Vertex project and region with fallbacks to the standard `GOOGLE_CLOUD_*` variables.
 - **`get_secret_dict(secret_name: str)`**: Fetches a bulk dictionary of configuration from AWS Secrets Manager utilizing memory caching via `boto3`.
 - **`get_keys_dict()`**: Orchestrates global keys seamlessly.
+
+**Config vs secrets:** `KEY_LOCATION` only moves credentials (`DATABASE_URL`, provider keys, provider URLs). Mode switches, project ids and regions are deployment config and are always read from `.env`, since `SECRET_NAME` itself must be readable before Secrets Manager can be reached.
 
 ### File: `utils/file_ops.py`
 Standardized file operations.
@@ -191,7 +197,9 @@ Standardized file operations.
 - **`read_csv(file_path: str)`**: Reads CSV rows utilizing the standard dictionary reader.
 
 ### File: `utils/logger.py`
-- **`get_logger(name: str, level: int = logging.INFO)`**: Builds a dual-channel logger passing standard strings to the CLI, and capturing the robust JSON log structure internally to the `/logs` directory based on the active date timestamp.
+- **`get_logger(name: str, level: Optional[int] = None)`**: Returns a logger honouring `LOGGING_MODE` and `LOGGING_LEVEL`. Under `NORMAL` it builds a dual-channel `logging.Logger` passing standard strings to the CLI and capturing the JSON log structure into `/logs` by date. Under `LAMBDA` it returns a `LambdaLogger` that prints one JSON record per line to stdout, since Lambda has a read-only filesystem and CloudWatch already captures stdout. An explicit `level` argument overrides `LOGGING_LEVEL`.
+- **`get_logging_mode()` / `get_logging_level()`**: Parse and validate the two variables, accepting either level names (`DEBUG`, `INFO`, ...) or numeric levels.
+- **`LambdaLogger`**: Print-based stand-in mirroring the `Logger` methods used across the project (`debug`/`info`/`warning`/`error`/`critical`/`exception`/`log`), including `%`-style lazy interpolation and traceback capture.
 
 ### File: `utils/markitdown_utils.py`
 Integrates Microsoft's MarkItDown.

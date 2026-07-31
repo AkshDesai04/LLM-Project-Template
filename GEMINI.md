@@ -54,7 +54,7 @@ The unified factory entry point (`ModelRouter`). It abstracts the provider selec
 
 ### `core/llm_models/providers/`
 This folder maps the abstracted provider classes integrating directly with backend Python SDK architectures natively.
-*   **`gemini.py` (`GeminiProvider`)**: Operates the `google-genai` SDK executing standard loops, managing `ThinkingConfig` generation loops, and routing media either through the Developer File API (`GEMINI_AUTH_MODE=api_key`) or as inlined `Part`s under Vertex AI (`GEMINI_AUTH_MODE=service_account`). Auth mode, the service-account JSON, and the Vertex project/location are all read from `.env`.
+*   **`gemini.py` (`GeminiProvider`)**: Operates the `google-genai` SDK executing standard loops, managing `ThinkingConfig` generation loops, and routing media either through the Developer File API (`GEMINI_KEY_TYPE=GEMINI_KEY`) or as inlined `Part`s under Vertex AI (`GEMINI_KEY_TYPE=SERVICE_ACC_JSON`). The credential type, the service-account JSON, and the Vertex project/location are all read from `.env`.
 *   **`openai.py` (`OpenAIProvider`)**: Implements strict `beta.chat.completions.parse` routines natively handling extensive visual data parsing via `media_utils` logic avoiding missing native media API boundaries. Triggers the specialized `responses` API robustly handling unaccepted chat logic configurations automatically seamlessly retrying context errors securely.
 *   **`anthropic.py` (`AnthropicProvider`)**: Drives the Claude Messages API, supplying the mandatory `max_tokens` cap, hoisting the system prompt to its own top-level argument and translating shared media payloads into native image blocks. Structured output is forced through a single schema-derived tool call because Anthropic exposes no JSON response format; embeddings are unsupported by design.
 *   **`ollama.py` (`OllamaProvider`)**: Seamlessly connects to dynamic `localhost` Ollama deployments mapping images dynamically avoiding cloud storage, securely capturing locally run metrics gracefully mapping structural returns safely.
@@ -74,14 +74,18 @@ Helper scripts for infrastructure, conversion, and system-level operations.
 
 ### `utils/env_ops.py`
 A hybrid local/cloud secrets manager mapping local overrides contextually scaling complex cloud infrastructures robustly via `boto3`.
+*   **`KEY_LOCATION` switch:** `get_secret()` is the single entry point providers call for credentials. `LOCAL` resolves through `get_local_secret` (`.env`); `AWS_SM` resolves through `get_aws_secret` against the bundle named by `SECRET_NAME`. This covers `DATABASE_URL`, the provider keys, and the provider URLs. Mode switches, project ids and regions stay in `.env` regardless, because `SECRET_NAME` must be readable before Secrets Manager can be reached.
 *   **Key Functions:** Integrates `get_aws_secret` utilizing dynamic `SECRET_NAME` references mapping deep structural API key dicts gracefully resolving memory locks caching local execution metrics resolving latency.
 
 ### `utils/file_ops.py`
 Standardized IO operations ensuring utf-8 encodings and proper error handling. Includes text/binary data ingestion mapping local text layouts securely natively mapping `.csv` metrics contextually.
 
 ### `utils/logger.py`
-Provides a robust, dual-output logging system.
-*   **Key Features:** Outputs standard readable logs to the terminal (`sys.stdout`) natively yielding structured, contextually mapped **JSON** architectures yielding native telemetry parsing routines straight to `logs/` timestamping seamlessly.
+Provides a robust, dual-output logging system driven by `LOGGING_MODE` and `LOGGING_LEVEL`.
+*   **`LOGGING_MODE=NORMAL`:** Outputs standard readable logs to the terminal (`sys.stdout`) natively yielding structured, contextually mapped **JSON** architectures yielding native telemetry parsing routines straight to `logs/` timestamping seamlessly.
+*   **`LOGGING_MODE=LAMBDA`:** Swaps the logging package for plain `print`, emitting one JSON record per line to stdout. No file handler is created, since Lambda's filesystem is read-only and CloudWatch already ingests stdout. `get_logger` returns a `LambdaLogger` exposing the same method surface, so call sites are unchanged.
+*   **`LOGGING_LEVEL`:** Accepts level names or numeric values and applies to both modes. An explicit `level` argument to `get_logger` still wins.
+*   **Note:** This module reads the environment directly rather than through `env_ops`, because `env_ops` imports it.
 
 ### `utils/markitdown_utils.py`
 A comprehensive Microsoft `MarkItDown` integration mapping heavy multi-modal documents securely via a centralized class pipeline resolving disparate inputs securely.
