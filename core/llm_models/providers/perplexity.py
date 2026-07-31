@@ -5,6 +5,12 @@ from utils.logger import get_logger
 from utils.env_ops import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
+from ..reasoning import (
+    ThinkTagStreamSplitter,
+    build_result,
+    resolve_return_reasoning,
+    split_think_tags,
+)
 from core.modules.base import Base as BaseModule
 
 try:
@@ -37,6 +43,7 @@ class PerplexityProvider(LLMProvider):
         return_citations = kwargs.get('return_citations', getattr(module, 'return_citations', self.return_citations))
         search_recency_filter = kwargs.get('search_recency_filter', getattr(module, 'search_recency_filter', self.search_recency_filter))
         stream = kwargs.get('stream', getattr(module, 'stream', self.stream))
+        return_reasoning = resolve_return_reasoning(module, kwargs, self.return_reasoning)
 
         messages = []
         if system_prompt:
@@ -84,6 +91,8 @@ class PerplexityProvider(LLMProvider):
 
                 if stream:
                     def stream_wrapper():
+                        splitter = ThinkTagStreamSplitter()
+
                         for chunk in response:
                             if getattr(chunk, 'usage', None):
                                 u = chunk.usage
@@ -106,7 +115,23 @@ class PerplexityProvider(LLMProvider):
                                     cached_tokens=0,
                                 )
                                 logger.info(f"Perplexity Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
-                            yield chunk
+
+                            if not return_reasoning:
+                                yield chunk
+                                continue
+
+                            delta = getattr(
+                                (chunk.choices or [None])[0], 'delta', None
+                            ) if getattr(chunk, 'choices', None) else None
+
+                            text, thought = splitter.feed(getattr(delta, 'content', None))
+                            if text or thought:
+                                yield [text, thought]
+
+                        if return_reasoning:
+                            text, thought = splitter.flush()
+                            if text or thought:
+                                yield [text, thought]
                     return stream_wrapper()
 
                 total_duration = time.time() - start_time
@@ -132,7 +157,10 @@ class PerplexityProvider(LLMProvider):
                         cached_tokens=0,
                     )
 
-                return output_content
+                # sonar-reasoning inlines its chain of thought in the content.
+                output_content, reasoning = split_think_tags(output_content)
+
+                return build_result(output_content, reasoning, return_reasoning)
 
             except Exception as e:
                 last_exception = e

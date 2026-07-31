@@ -9,6 +9,13 @@ from utils.logger import get_logger
 from utils.env_ops import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
+from ..reasoning import (
+    ThinkTagStreamSplitter,
+    build_result,
+    join_reasoning,
+    resolve_return_reasoning,
+    split_think_tags,
+)
 from ..utils.media_utils import (
     extract_text_from_pdf_bytes,
     process_video_frames,
@@ -81,6 +88,7 @@ class VLLMProvider(LLMProvider):
         frequency_penalty = kwargs.get('frequency_penalty', getattr(module, 'frequency_penalty', self.frequency_penalty))
         stream = kwargs.get('stream', getattr(module, 'stream', self.stream))
         tools = kwargs.get('tools') or kwargs.get('function') or getattr(module, 'tools', self.tools)
+        return_reasoning = resolve_return_reasoning(module, kwargs, self.return_reasoning)
 
         stop = kwargs.get('stop') or kwargs.get('stop_sequences') or getattr(module, 'stop_sequences', self.stop_sequences)
         if isinstance(stop, str):
@@ -176,6 +184,8 @@ class VLLMProvider(LLMProvider):
 
                 if stream:
                     def stream_wrapper():
+                        splitter = ThinkTagStreamSplitter()
+
                         for chunk in response:
                             if getattr(chunk, 'usage', None):
                                 usage = chunk.usage
@@ -197,11 +207,34 @@ class VLLMProvider(LLMProvider):
                                     f"vLLM Stream Transaction Recorded: "
                                     f"{prompt_tokens} in / {completion_tokens} out"
                                 )
-                            yield chunk
+
+                            if not return_reasoning:
+                                yield chunk
+                                continue
+
+                            delta = getattr(
+                                (chunk.choices or [None])[0], 'delta', None
+                            ) if getattr(chunk, 'choices', None) else None
+
+                            text, thought = splitter.feed(getattr(delta, 'content', None))
+                            thought = join_reasoning([
+                                getattr(delta, 'reasoning_content', None),
+                                thought,
+                            ]) or ""
+
+                            if text or thought:
+                                yield [text, thought]
+
+                        if return_reasoning:
+                            text, thought = splitter.flush()
+                            if text or thought:
+                                yield [text, thought]
                     return stream_wrapper()
 
                 total_duration = time.time() - start_time
-                output_content = response.choices[0].message.content
+                message = response.choices[0].message
+                output_content = message.content
+                field_reasoning = getattr(message, 'reasoning_content', None)
 
                 usage = getattr(response, 'usage', None)
                 if usage:
@@ -226,12 +259,17 @@ class VLLMProvider(LLMProvider):
                 if not output_content:
                     raise ValueError("Received an empty response from vLLM.")
 
+                # Strip inline thoughts before parsing, or the <think> block
+                # would make otherwise valid JSON unparseable.
+                output_content, inline_reasoning = split_think_tags(output_content)
+                reasoning = join_reasoning([field_reasoning, inline_reasoning])
+
                 if structure:
                     try:
                         parsed = json.loads(output_content)
                         if hasattr(structure, 'model_validate'):
-                            return structure.model_validate(parsed)
-                        return parsed
+                            parsed = structure.model_validate(parsed)
+                        return build_result(parsed, reasoning, return_reasoning)
                     except Exception as e:
                         logger.warning(f"Failed to parse structured vLLM response: {e}")
                         if attempt < max_retries - 1:
@@ -239,7 +277,7 @@ class VLLMProvider(LLMProvider):
                             time.sleep(2)
                             continue
 
-                return output_content
+                return build_result(output_content, reasoning, return_reasoning)
 
             except Exception as e:
                 last_exception = e

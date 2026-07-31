@@ -10,6 +10,13 @@ from utils.logger import get_logger
 from utils.env_ops import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
+from ..reasoning import (
+    ThinkTagStreamSplitter,
+    build_result,
+    join_reasoning,
+    resolve_return_reasoning,
+    split_think_tags,
+)
 from ..utils.media_utils import extract_text_from_pdf_bytes, process_video_frames
 from core.modules.base import Base as BaseModule
 
@@ -41,6 +48,7 @@ class OllamaProvider(LLMProvider):
         stop = kwargs.get('stop') or kwargs.get('stop_sequences') or getattr(module, 'stop_sequences', self.stop_sequences)
         seed = kwargs.get('seed', getattr(module, 'seed', self.seed))
         stream = kwargs.get('stream', getattr(module, 'stream', self.stream))
+        return_reasoning = resolve_return_reasoning(module, kwargs, self.return_reasoning)
         
         # Ollama specific options
         options = {
@@ -115,6 +123,8 @@ class OllamaProvider(LLMProvider):
                     )
                     
                     def stream_wrapper():
+                        splitter = ThinkTagStreamSplitter()
+
                         for chunk in response_stream:
                             if chunk.get('done'):
                                 prompt_tokens = chunk.get('prompt_eval_count', 0)
@@ -131,7 +141,25 @@ class OllamaProvider(LLMProvider):
                                     cached_tokens=0,
                                 )
                                 logger.info(f"Ollama Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
-                            yield chunk
+
+                            if not return_reasoning:
+                                yield chunk
+                                continue
+
+                            message = chunk.get('message') or {}
+                            text, thought = splitter.feed(message.get('content'))
+                            thought = join_reasoning([
+                                message.get('thinking'),
+                                thought,
+                            ]) or ""
+
+                            if text or thought:
+                                yield [text, thought]
+
+                        if return_reasoning:
+                            text, thought = splitter.flush()
+                            if text or thought:
+                                yield [text, thought]
                     return stream_wrapper()
 
                 response = self.client.chat(
@@ -142,7 +170,9 @@ class OllamaProvider(LLMProvider):
                 )
                 
                 total_duration = time.time() - start_time
-                output_content = response['message']['content']
+                message = response['message']
+                output_content = message['content']
+                field_reasoning = message.get('thinking')
                 
                 prompt_tokens = response.get('prompt_eval_count', 0)
                 completion_tokens = response.get('eval_count', 0)
@@ -159,19 +189,24 @@ class OllamaProvider(LLMProvider):
                 )
                 logger.info(f"Ollama Transaction Recorded: ${costs['total_cost']:.6f} total cost")
                 
+                # Strip inline thoughts before parsing, or the <think> block
+                # would make otherwise valid JSON unparseable.
+                output_content, inline_reasoning = split_think_tags(output_content)
+                reasoning = join_reasoning([field_reasoning, inline_reasoning])
+
                 if structure:
                     try:
                         parsed = json.loads(output_content)
                         if hasattr(structure, 'model_validate'):
-                             return structure.model_validate(parsed)
-                        return parsed
+                             parsed = structure.model_validate(parsed)
+                        return build_result(parsed, reasoning, return_reasoning)
                     except Exception as e:
                         logger.warning(f"Failed to parse Ollama JSON response: {e}")
                         if attempt < max_retries - 1:
                             time.sleep(2)
                             continue
                 
-                return output_content
+                return build_result(output_content, reasoning, return_reasoning)
 
             except ollama.ResponseError as e:
                 last_exception = e

@@ -9,6 +9,7 @@ from utils.logger import get_logger
 from utils.env_ops import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
+from ..reasoning import build_result, join_reasoning, resolve_return_reasoning
 from ..utils.media_utils import (
     extract_text_from_pdf_bytes,
     process_video_frames,
@@ -128,6 +129,7 @@ class AnthropicProvider(LLMProvider):
         max_tokens = kwargs.get('max_tokens', getattr(module, 'max_tokens', self.max_tokens)) or DEFAULT_MAX_TOKENS
         stream = kwargs.get('stream', getattr(module, 'stream', self.stream))
         tools = kwargs.get('tools') or kwargs.get('function') or getattr(module, 'tools', self.tools)
+        return_reasoning = resolve_return_reasoning(module, kwargs, self.return_reasoning)
 
         reasoning_budget = (
             kwargs.get('reasoning_budget')
@@ -223,7 +225,17 @@ class AnthropicProvider(LLMProvider):
                                     )
                                     output_tokens = delta_output or output_tokens
 
-                                yield event
+                                if not return_reasoning:
+                                    yield event
+                                    continue
+
+                                delta = getattr(event, 'delta', None)
+                                delta_type = getattr(delta, 'type', '')
+
+                                if delta_type == 'thinking_delta':
+                                    yield ["", getattr(delta, 'thinking', '') or ""]
+                                elif delta_type == 'text_delta':
+                                    yield [getattr(delta, 'text', '') or "", ""]
                         finally:
                             total_duration = time.time() - start_time
                             costs = cost_tracker.calculate_cost(
@@ -249,6 +261,7 @@ class AnthropicProvider(LLMProvider):
                 total_duration = time.time() - start_time
 
                 text_parts = []
+                thinking_parts = []
                 tool_payload = None
 
                 for block in getattr(response, 'content', []) or []:
@@ -256,8 +269,15 @@ class AnthropicProvider(LLMProvider):
 
                     if block_type == 'text':
                         text_parts.append(getattr(block, 'text', ''))
+                    elif block_type == 'thinking':
+                        thinking_parts.append(getattr(block, 'thinking', ''))
+                    elif block_type == 'redacted_thinking':
+                        # Encrypted by safety systems; the text is unavailable.
+                        thinking_parts.append("[redacted thinking block]")
                     elif block_type == 'tool_use' and getattr(block, 'name', '') == STRUCTURED_TOOL_NAME:
                         tool_payload = getattr(block, 'input', None)
+
+                reasoning = join_reasoning(thinking_parts)
 
                 output_content = "\n".join(part for part in text_parts if part).strip()
 
@@ -288,10 +308,14 @@ class AnthropicProvider(LLMProvider):
 
                 if tool_payload is not None:
                     if hasattr(structure, 'model_validate'):
-                        return structure.model_validate(tool_payload)
-                    return tool_payload
+                        return build_result(
+                            structure.model_validate(tool_payload),
+                            reasoning,
+                            return_reasoning,
+                        )
+                    return build_result(tool_payload, reasoning, return_reasoning)
 
-                return output_content
+                return build_result(output_content, reasoning, return_reasoning)
 
             except Exception as e:
                 last_exception = e

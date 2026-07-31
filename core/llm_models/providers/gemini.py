@@ -19,6 +19,7 @@ from utils.env_ops import (
 )
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
+from ..reasoning import build_result, join_reasoning, resolve_return_reasoning
 from core.modules.base import Base as BaseModule
 
 logger = get_logger("GeminiProvider")
@@ -66,6 +67,28 @@ class GeminiProvider(LLMProvider):
             credentials=credentials,
         )
 
+    @staticmethod
+    def _split_thought_parts(candidates: Any) -> tuple:
+        """
+        Gemini returns thoughts as ordinary Parts flagged with thought=True,
+        mixed in with the answer. Returns (reasoning, answer_text).
+        """
+        thoughts = []
+        answers = []
+
+        for candidate in candidates or []:
+            content = getattr(candidate, 'content', None)
+            for part in getattr(content, 'parts', None) or []:
+                text = getattr(part, 'text', None)
+                if not text:
+                    continue
+                if getattr(part, 'thought', False):
+                    thoughts.append(text)
+                else:
+                    answers.append(text)
+
+        return join_reasoning(thoughts), "".join(answers)
+
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         prompt = getattr(module, 'prompt', "")
         structure = kwargs.get('schema') or kwargs.get('structure') or getattr(module, 'structure', None)
@@ -89,6 +112,7 @@ class GeminiProvider(LLMProvider):
         tools = kwargs.get('tools') or kwargs.get('function') or getattr(module, 'tools', self.tools)
         safety_settings = kwargs.get('safety_settings', getattr(module, 'safety_settings', self.safety_settings))
         stream = kwargs.get('stream', getattr(module, 'stream', self.stream))
+        return_reasoning = resolve_return_reasoning(module, kwargs, self.return_reasoning)
 
         contents: List[Any] = [prompt]
         if uploaded_file:
@@ -112,6 +136,10 @@ class GeminiProvider(LLMProvider):
                         thinking_config_obj = types.ThinkingConfig(include_thoughts=True, thinking_level=reasoning)
                     else:
                         thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
+                elif return_reasoning:
+                    # Thought Parts are only returned when they are asked for, so
+                    # the flag alone has to switch them on.
+                    thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
 
                 config = types.GenerateContentConfig(
                     temperature=temperature,
@@ -157,7 +185,14 @@ class GeminiProvider(LLMProvider):
                                     cached_tokens=cached_tokens,
                                 )
                                 logger.info(f"Gemini Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
-                            yield chunk
+
+                            if return_reasoning:
+                                chunk_reasoning, chunk_text = self._split_thought_parts(
+                                    getattr(chunk, 'candidates', None)
+                                )
+                                yield [chunk_text, chunk_reasoning]
+                            else:
+                                yield chunk
                     return stream_wrapper()
 
                 response = self.client.models.generate_content(model=model, contents=contents, config=config)
@@ -187,9 +222,18 @@ class GeminiProvider(LLMProvider):
 
                     logger.info(f"Gemini Transaction Recorded: ${costs['total_cost']:.6f} total cost")
 
+                reasoning, answer_text = self._split_thought_parts(
+                    getattr(response, 'candidates', None)
+                )
+
                 if structure:
-                    return response.parsed
-                return response.text
+                    return build_result(response.parsed, reasoning, return_reasoning)
+
+                # response.text spans every Part, so prefer the thought-free
+                # text when thoughts were included.
+                return build_result(
+                    answer_text or response.text, reasoning, return_reasoning
+                )
 
             except Exception as e:
                 last_exception = e
