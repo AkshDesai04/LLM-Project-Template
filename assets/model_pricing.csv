@@ -91,8 +91,9 @@ sr,model_id,model_provider,model_type,release_date,deprication_date,input_cost_p
 90,gemini-embedding-2,Google,embedding,2026-04,N/A,0.2,N/A,N/A,N/A,N/A
 91,gemini-3.1-flash-lite,Google,llm,2026-05,2027-05,0.25,1.5,N/A,N/A,0.025
 92,gemini-3.5-flash,Google,llm,2026-05,N/A,1.5,9,N/A,N/A,0.15
-93,gemini-3.5-live-translate-preview,Google,llm,~2026-06,N/A,3.5,21,N/A,N/A,N/A
-94,gemini-3.6-flash,Google,llm,2026-07,N/A,1.5,7.5,N/A,N/A,0.15
-95,gemini-3.5-flash-lite,Google,llm,2026-07,N/A,0.3,2.5,N/A,N/A,0.03
-96,gemini-robotics-er-2-preview,Google,llm,2026-07,N/A,2,10,N/A,N/A,0.2
-97,gemini-robotics-er-2-streaming-preview,Google,llm,2026-07,N/A,2,10,N/A,N/A,N/A
+93,gemini-omni-flash-preview,Google,llm,2026-06,N/A,1.5,9,N/A,N/A,N/A
+94,gemini-3.5-live-translate-preview,Google,llm,~2026-06,N/A,3.5,21,N/A,N/A,N/A
+95,gemini-3.6-flash,Google,llm,2026-07,N/A,1.5,7.5,N/A,N/A,0.15
+96,gemini-3.5-flash-lite,Google,llm,2026-07,N/A,0.3,2.5,N/A,N/A,0.03
+97,gemini-robotics-er-2-preview,Google,llm,2026-07,N/A,2,10,N/A,N/A,0.2
+98,gemini-robotics-er-2-streaming-preview,Google,llm,2026-07,N/A,2,10,N/A,N/A,N/A
