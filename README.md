@@ -3,7 +3,7 @@ This project is a template.
 # LLM-Project-Template
 
 ## Overview
-This repository serves as a modular template for building applications that integrate with Large Language Models (LLMs) like Google Gemini, OpenAI, Anthropic, Ollama, and Perplexity. It includes robust utilities for logging, parallel execution, environment management, and document processing via MarkItDown.
+This repository serves as a modular template for building applications that integrate with Large Language Models (LLMs) like Google Gemini, OpenAI, Anthropic, Ollama, vLLM, and Perplexity. It includes robust utilities for logging, parallel execution, environment management, and document processing via MarkItDown.
 
 ---
 
@@ -68,8 +68,10 @@ Unified entry point for dynamic model selection and routing across multiple LLM 
   - **Process:** Walks the model chain. On each failure, records a zero-token failed attempt via `CostTracker` and tries the next fallback (including cross-provider fallbacks). Raises if the entire chain fails.
 - **`get_provider_by_model_name(model_name: str) -> str` (static)**
   - **Input:** `model_name` (str).
-  - **Output:** `str` - Provider name (e.g., "openai", "google", "anthropic", "ollama", "perplexity").
-  - **Process:** Routes requests by matching model string prefixes (`gpt`/`o1`/`o3`, `gemini`, `claude`, `sonar`, `ollama/`).
+  - **Output:** `str` - Provider name (e.g., "openai", "google", "anthropic", "ollama", "vllm", "perplexity").
+  - **Process:** Routes requests by matching model string prefixes (`gpt`/`o1`/`o3`, `gemini`, `claude`, `sonar`, `ollama/`, `vllm/`).
+- **`strip_routing_prefix(model_name: str) -> str` (static)**
+  - **Process:** Removes a routing-only prefix (`ollama/`, `vllm/`) so the bare model name is what reaches the server.
 
 ---
 
@@ -118,6 +120,21 @@ Implementation of the local Ollama LLM provider.
 #### Class: `OllamaProvider` (LLMProvider)
 - **`model_response(...)`**
   - **Process:** Communicates with local open-source models using the Ollama SDK, gracefully injecting system prompts, maintaining structured formats via JSON parsing, and handling base64 visual files.
+
+---
+
+### File: `core/llm_models/providers/vllm.py`
+Client for a self-hosted vLLM OpenAI-compatible server.
+
+#### Class: `VLLMProvider` (LLMProvider)
+- **`model_response(...)`**
+  - **Process:** Points the OpenAI SDK at the vLLM server resolved from `VLLM_URL` (default `http://localhost:8000/v1`). Constrains structured output through the standard `response_format` with a `json_schema` derived from the Pydantic model, and passes vLLM-only sampling knobs (`top_k`, `repetition_penalty`) via `extra_body`. Supports streaming with usage accounting.
+- **`upload_media(...)`**
+  - **Process:** Extracts PDF text locally, base64-encodes images for vision models, and slices video into frames.
+- **`embed_content(...)`**
+  - **Process:** Calls `/v1/embeddings`, which requires the server to be running an embedding model.
+
+Note: this is a client only. The `vllm` package is never imported, so no GPU runtime is needed to use it. Because vLLM serves arbitrary model names, routing requires the explicit `vllm/` prefix (for example `vllm/meta-llama/Llama-3.1-8B-Instruct`). Self-hosted models have no per-token price, so transactions are recorded at $0.00.
 
 ---
 

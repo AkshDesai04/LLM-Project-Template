@@ -1,6 +1,6 @@
 # Project Overview
 
-This repository is a modular, scalable Python template designed for building robust applications that integrate with Large Language Models (LLMs) such as Google Gemini, OpenAI, Anthropic, Ollama, and Perplexity. It abstracts away provider-specific implementations, offering unified interfaces for prompt configuration, model routing, media uploading (PDF, Video, Images), cost calculation, parallel execution, and complex file conversions.
+This repository is a modular, scalable Python template designed for building robust applications that integrate with Large Language Models (LLMs) such as Google Gemini, OpenAI, Anthropic, Ollama, vLLM, and Perplexity. It abstracts away provider-specific implementations, offering unified interfaces for prompt configuration, model routing, media uploading (PDF, Video, Images), cost calculation, parallel execution, and complex file conversions.
 
 ### `assets/model_pricing.csv`
 This file is the central source of truth for all supported models within the framework. It acts as a local database containing crucial metadata for dozens of models across different providers.
@@ -58,6 +58,7 @@ This folder maps the abstracted provider classes integrating directly with backe
 *   **`openai.py` (`OpenAIProvider`)**: Implements strict `beta.chat.completions.parse` routines natively handling extensive visual data parsing via `media_utils` logic avoiding missing native media API boundaries. Triggers the specialized `responses` API robustly handling unaccepted chat logic configurations automatically seamlessly retrying context errors securely.
 *   **`anthropic.py` (`AnthropicProvider`)**: Drives the Claude Messages API, supplying the mandatory `max_tokens` cap, hoisting the system prompt to its own top-level argument and translating shared media payloads into native image blocks. Structured output is forced through a single schema-derived tool call because Anthropic exposes no JSON response format; embeddings are unsupported by design.
 *   **`ollama.py` (`OllamaProvider`)**: Seamlessly connects to dynamic `localhost` Ollama deployments mapping images dynamically avoiding cloud storage, securely capturing locally run metrics gracefully mapping structural returns safely.
+*   **`vllm.py` (`VLLMProvider`)**: Client for a self-hosted vLLM OpenAI-compatible server resolved from `VLLM_URL`, defaulting to `http://localhost:8000/v1`. Constrains schemas through the standard `response_format` json_schema field rather than the `guided_json` extra removed in vLLM v0.12.0, and forwards vLLM-only sampling knobs through `extra_body`. The heavyweight `vllm` package is never imported, so no GPU runtime is required; models must carry the explicit `vllm/` prefix since the server exposes arbitrary names.
 *   **`perplexity.py` (`PerplexityProvider`)**: Hooks across OpenAI base class structures mapping web index references dynamically defining native citations formatting without additional client SDK integrations.
 
 ### `core/llm_models/utils/media_utils.py`

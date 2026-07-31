@@ -8,6 +8,9 @@ from .cost_tracker import cost_tracker
 
 logger = get_logger("ModelRouter")
 
+# Prefixes that only select a provider and are stripped before the call is made.
+ROUTING_PREFIXES = ("ollama/", "vllm/")
+
 class ModelRouter:
     def __init__(self, module: BaseModule, fallback_index: int = 0):
         primary = module.model
@@ -38,18 +41,22 @@ class ModelRouter:
                 f"during router setup (will retry in model_response / fallbacks): {e}"
             )
 
+    @staticmethod
+    def strip_routing_prefix(model_name: str) -> str:
+        """
+        Removes a routing-only prefix, e.g. 'ollama/llama3.2:1b' -> 'llama3.2:1b'
+        and 'vllm/meta-llama/Llama-3.1-8B' -> 'meta-llama/Llama-3.1-8B'.
+        """
+        if model_name.lower().startswith(ROUTING_PREFIXES):
+            return model_name.split("/", 1)[1]
+        return model_name
+
     def _build_provider(self, model_name: str, module: BaseModule) -> LLMProvider:
         """Constructs the correct LLMProvider for a given model name."""
-        module_for_init = module.model_copy(update={'model': model_name})
-
         provider = self.get_provider_by_model_name(model_name)
-        model_name_lower = model_name.lower()
 
-        # Strip provider prefix if present (e.g., 'ollama/llama3.2:1b' -> 'llama3.2:1b')
-        if "/" in model_name:
-            if model_name_lower.startswith("ollama/"):
-                model_name = model_name.split("/", 1)[1]
-                module_for_init = module.model_copy(update={'model': model_name})
+        model_name = self.strip_routing_prefix(model_name)
+        module_for_init = module.model_copy(update={'model': model_name})
 
         logger.info(f"Routing to provider: {provider} for model '{model_name}'")
 
@@ -73,12 +80,18 @@ class ModelRouter:
             from .providers.ollama import OllamaProvider
             return OllamaProvider(None, LLMProvider.prepare_module(module_for_init))
 
+        if provider == 'vllm':
+            from .providers.vllm import VLLMProvider
+            return VLLMProvider(None, LLMProvider.prepare_module(module_for_init))
+
         raise ValueError(f"Unsupported provider: '{provider}'")
 
     @staticmethod
     def get_provider_by_model_name(model_name: str) -> str:
         """Determines the model provider based on the model name prefix."""
         model_name_lower = model_name.lower()
+        if model_name_lower.startswith("vllm/"):
+            return "vllm"
         if model_name_lower.startswith("ollama/"):
             return "ollama"
         if model_name_lower.startswith("gpt"):
@@ -99,16 +112,13 @@ class ModelRouter:
             return "perplexity"
 
         raise ValueError(f"Could not determine provider for model '{model_name}'. "
-                         f"Model name should start with 'gpt', 'gemini', 'claude', 'sonar', or 'ollama'.")
+                         f"Model name should start with 'gpt', 'gemini', 'claude', 'sonar', "
+                         f"'ollama/', or 'vllm/'.")
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
-        if 'model' in kwargs:
-            model_name = kwargs['model']
-            if model_name.lower().startswith("ollama/"):
-                kwargs['model'] = model_name.split("/", 1)[1]
-
         # If the caller explicitly overrides the model, skip the fallback chain
         if 'model' in kwargs:
+            kwargs['model'] = self.strip_routing_prefix(kwargs['model'])
             if self.model_instance is None:
                 self.model_instance = self._build_provider(kwargs['model'], self._original_module)
             return self.model_instance.model_response(module, uploaded_file, **kwargs)
@@ -123,9 +133,7 @@ class ModelRouter:
                 provider = self._build_provider(model_name, self._original_module)
                 self.model_instance = provider
 
-                call_kwargs = {**kwargs, 'model': model_name}
-                if model_name.lower().startswith("ollama/"):
-                    call_kwargs['model'] = model_name.split("/", 1)[1]
+                call_kwargs = {**kwargs, 'model': self.strip_routing_prefix(model_name)}
 
                 return provider.model_response(module, uploaded_file, **call_kwargs)
 
