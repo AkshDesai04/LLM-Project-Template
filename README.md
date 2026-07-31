@@ -67,11 +67,22 @@ Unified entry point for dynamic model selection and routing across multiple LLM 
 - **`model_response(...)`**
   - **Process:** Walks the model chain. On each failure, records a zero-token failed attempt via `CostTracker` and tries the next fallback (including cross-provider fallbacks). Raises if the entire chain fails.
 - **`get_provider_by_model_name(model_name: str) -> str` (static)**
-  - **Input:** `model_name` (str).
+  - **Input:** `model_name` (str) in the canonical `provider/model` form.
   - **Output:** `str` - Provider name (e.g., "openai", "google", "anthropic", "ollama", "vllm", "perplexity").
-  - **Process:** Routes requests by matching model string prefixes (`gpt`/`o1`/`o3`, `gemini`, `claude`, `sonar`, `ollama/`, `vllm/`).
+  - **Process:** Reads the provider straight off the prefix. A name with no recognised prefix falls back to `_infer_provider_from_bare_name`, which guesses from the model family and logs a warning.
 - **`strip_routing_prefix(model_name: str) -> str` (static)**
-  - **Process:** Removes a routing-only prefix (`ollama/`, `vllm/`) so the bare model name is what reaches the server.
+  - **Process:** Removes the provider prefix so the bare model id is what reaches the SDK and the pricing table.
+
+---
+
+### File: `core/llm_models/model_names.py`
+Owns the `provider/model` naming convention, shared by the router and the cost tracker.
+
+- **`PROVIDER_ALIASES`**: Accepted prefixes mapped onto internal provider keys — `gemini`/`google` → google, `openai`, `anthropic`/`claude`, `perplexity`/`sonar`, `ollama`, `vllm`.
+- **`split_model_name(model_name) -> (provider | None, model)`**: Splits on the first slash, but only when the prefix is a known alias, so a repository-style id like `meta-llama/Llama-3.1-8B` survives intact. `vllm/meta-llama/Llama-3.1-8B` yields `("vllm", "meta-llama/Llama-3.1-8B")`.
+- **`strip_provider_prefix(model_name) -> str`**: The bare model id.
+
+**Why the prefix:** the provider is stated rather than guessed, so a model released after this code was written routes correctly with no change here and no row in `assets/model_pricing.csv`. An unpriced model is reported at `$0.00` with a warning; the call itself is unaffected.
 
 ---
 

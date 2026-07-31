@@ -4,7 +4,8 @@ This repository is a modular, scalable Python template designed for building rob
 
 ### `assets/model_pricing.csv`
 This file is the central source of truth for all supported models within the framework. It acts as a local database containing crucial metadata for dozens of models across different providers.
-*   **Structure:** It maps `model_id` (e.g., `gpt-4o`, `gemini-2.5-pro`) and details exact costs per million tokens for input, output, cached context, and tiered high-context pricing (e.g., input > 200k).
+*   **Structure:** It maps `model_id` (e.g., `gpt-4o`, `gemini-2.5-pro`) and details exact costs per million tokens for input, output, cached context, and tiered high-context pricing (e.g., input > 200k). Rows are keyed by the **bare** model id, without the `provider/` prefix used in module configs.
+*   **Not required for routing:** A model absent from this file still runs; it is simply reported at `$0.00` with a warning. Add a row when you want its cost tracked.
 *   **Dependency in `core/llm_models/cost_tracker.py`:** The singleton tracking class uses this CSV to dynamically resolve transaction costs in real-time, assigning exact financial metrics on each executed LLM completion.
 
 ---
@@ -19,8 +20,8 @@ Defines the `Base` class, which extends Pydantic's `BaseModel`. This is the stan
     *   `prompt` (str): The specific text instruction for the LLM.
     *   `system_prompt` (str): Broad system guidelines injected dynamically.
     *   `structure` (Any): Optional Pydantic model enforcing a structured JSON output.
-    *   `model` (str): The primary model identifier (e.g., `"gemini-2.5-pro"`).
-    *   `fallback_models` (list[str]): Alternative models attempted by `ModelRouter` if the primary fails. Defined only on module configs under `core/modules/`; providers never hardcode fallback names.
+    *   `model` (str): The primary model identifier in the canonical `provider/model` form (e.g., `"gemini/gemini-2.5-pro"`, `"openai/gpt-5.5-pro"`, `"anthropic/claude-opus-5"`).
+    *   `fallback_models` (list[str]): Alternative models attempted by `ModelRouter` if the primary fails, written in the same `provider/model` form. Defined only on module configs under `core/modules/`; providers never hardcode fallback names.
     *   `temperature`, `top_p`, `top_k`, `max_tokens`: Standard LLM generation parameters.
     *   `reasoning_budget` (int | str): Controls deep thinking parameters native to advanced reasoning models (`o1`, `o3`, `gpt-5`, Gemini Thinking modes).
     *   `stream` (bool): Configures the model to dispatch chunked iterative generators instead of static single completions.
@@ -47,7 +48,7 @@ Singleton class defining the `CostTracker`. Calculates and stores multi-call met
 ### `core/llm_models/router.py`
 The unified factory entry point (`ModelRouter`). It abstracts the provider selection process. **IMPORTANT: When calling an LLM, you must default to using `ModelRouter`. Direct instantiation of provider-specific files should be avoided.**
 *   **Key Functions & Flow:**
-    *   **`get_provider_by_model_name()`:** Scans model name prefixes dynamically categorizing routing constraints (`ollama/`, `gemini`, `gpt`, `sonar`) targeting local instances, Google, OpenAI, or Perplexity natively.
+    *   **`get_provider_by_model_name()`:** Reads the provider directly off the canonical `provider/model` prefix (`gemini/`, `openai/`, `anthropic/`, `perplexity/`, `ollama/`, `vllm/`). Because the provider is declared rather than inferred, a model released after this code was written routes correctly with no change to the router and no row in `assets/model_pricing.csv`. Unprefixed names still resolve through a legacy family guess that logs a warning.
     *   **Initialization & Lazy Loading:** Builds the model chain from `module.model` + `module.fallback_models`. Only initializes the specific requisite module avoiding bloat and missing API key errors. Retrieves keys contextually through local `.env` definitions mapping them into the abstracted `LLMProvider`.
     *   **Fallback Chain:** `model_response` walks the chain across providers. Each failed model is recorded as a zero-token `(failed)` row before the next fallback is attempted.
     *   **Proxy Methods:** Exposes core tasks cleanly bridging execution transparently without altering API interactions.
