@@ -34,6 +34,7 @@ class LLMProvider(ABC):
         self.frequency_penalty = getattr(base_config, 'frequency_penalty', 0.0)
         self.stop_sequences = getattr(base_config, 'stop_sequences', None)
         self.seed = getattr(base_config, 'seed', None)
+        self.return_reasoning = getattr(base_config, 'return_reasoning', False)
         
         self.candidate_count = getattr(base_config, 'candidate_count', 1)
         self.safety_settings = getattr(base_config, 'safety_settings', None)
