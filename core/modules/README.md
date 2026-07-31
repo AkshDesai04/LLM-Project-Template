@@ -82,7 +82,7 @@ beyond their type hints.
 | `top_k` | `int` | `40` |
 | `max_tokens` | `int \| None` | `None` |
 | `reasoning_budget` | `int \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| None` | `None` |
-| `return_reasoning` | `bool` | `False` |
+| `return_reasoning` | `bool` | `False` — when `True`, `model_response` returns `[response, reasoning]` instead of the bare response. `reasoning` is `None` when the model did not produce a chain of thought. |
 
 ### Penalties and sampling
 
@@ -127,6 +127,10 @@ rather than erroring**:
   Ollama.
 - Setting both `stream` and `structure` disables streaming on most providers, with a
   warning.
+- `return_reasoning` is supported on every provider. With streaming on it yields
+  `[content_delta, reasoning_delta]` pairs instead of the raw SDK chunks; with
+  streaming off it returns a two-element list. How each provider surfaces the
+  chain of thought is documented in `core/llm_models/providers/README.md`.
 
 ## `test_module.py` — `FileSummaryPrompt`
 

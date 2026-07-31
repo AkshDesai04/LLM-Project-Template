@@ -9,6 +9,7 @@ providers, falling back when one fails, and accounting for what it all cost live
 |---|---|
 | `router.py` | `ModelRouter` — the entry point. Picks a provider, walks the fallback chain. |
 | `model_names.py` | Owns the `provider/model` naming convention. |
+| `reasoning.py` | Shared helpers for the `return_reasoning` flag: tag stripping, stream splitting, and the `[response, reasoning]` return shape. |
 | `base_provider.py` | `LLMProvider` abstract base + the `JudgeResult` schema. |
 | `cost_tracker.py` | Singleton recording tokens and cost; prints a summary at exit. |
 | `providers/` | One module per backend. See `providers/README.md`. |
@@ -109,6 +110,24 @@ released after this code was written routes correctly with no code change and no
 row.** An unpriced model is reported at `$0.00` with a warning; the call itself is
 unaffected.
 
+## `reasoning.py`
+
+Shared helpers for the `return_reasoning` flag on `Base`. Every SDK exposes a model's
+chain of thought differently, so providers collect whatever their SDK offers and pass it
+through these helpers. Callers always see the same shape.
+
+| Helper | Purpose |
+|---|---|
+| `resolve_return_reasoning(module, kwargs, fallback=False)` | Resolves the flag with the usual kwargs > module > provider order. |
+| `join_reasoning(parts)` | Joins fragments, returning `None` rather than `""` when nothing remains. |
+| `split_think_tags(text)` | Pulls `<think>` / `<thinking>` / `<reasoning>` blocks out of a completed response. Safe to call on any text: no tags means the input is returned untouched with `None`. |
+| `build_result(response, reasoning, return_reasoning)` | Returns `[response, reasoning]` when the flag is on, otherwise the bare response. `response` keeps whatever type it already had, so a structured call still yields its parsed model at index 0. |
+| `ThinkTagStreamSplitter` | Incremental `split_think_tags` for streaming. Holds back enough text that a tag split across two chunks can never leak through as content; call `flush()` once the stream ends. |
+
+When the flag is on and streaming is on, providers yield `[content_delta, reasoning_delta]`
+pairs instead of the raw SDK chunks. How each provider obtains the reasoning itself is
+documented in `providers/README.md`.
+
 ## `base_provider.py`
 
 ### `JudgeResult`
@@ -128,8 +147,10 @@ are read directly and will raise `AttributeError` if missing (`model`, `temperat
 `top_p`, `top_k`, plus `api_key`); the rest use `getattr` with a fallback, e.g.
 `self.max_tokens = getattr(base_config, 'max_tokens', None)`.
 
-It deliberately does **not** capture `prompt`, `fallback_models`, `reasoning_budget` or
-`return_reasoning`. Fallback selection is the router's job, and prompts arrive per-call.
+It deliberately does **not** capture `prompt`, `fallback_models` or
+`reasoning_budget`. Fallback selection is the router's job, prompts arrive per-call,
+and the reasoning budget is resolved at call time because providers accept both string
+effort levels and integer token budgets.
 
 **`prepare_module(module)`** *(static)* normalises input and lazily loads prompts:
 accepts either a class (which it instantiates) or an instance; raises `TypeError`

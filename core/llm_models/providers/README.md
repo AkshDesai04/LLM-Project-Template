@@ -62,6 +62,24 @@ summary.
 **Media.** Non-Gemini providers convert media locally through
 `../utils/media_utils.py` rather than uploading it, because only Gemini has a Files API.
 
+**`return_reasoning`.** When the flag is on, every provider returns
+`[response, reasoning]` (or yields `[content_delta, reasoning_delta]` pairs while
+streaming). `reasoning` is `None` when the model produced none. Shared helpers live in
+`../reasoning.py`. How each provider obtains the chain of thought:
+
+| Provider | Source |
+|---|---|
+| Gemini | Parts flagged `thought=True`. The flag alone forces `include_thoughts=True`. |
+| OpenAI | Responses API reasoning summaries (`summary="auto"`), or `reasoning_content` / `<think>` tags on Chat Completions. |
+| Anthropic | `thinking` / `redacted_thinking` content blocks. |
+| Ollama | The message's `thinking` field, falling back to `<think>` tags in the content. |
+| vLLM | The message's `reasoning_content` field, falling back to `<think>` tags. |
+| Perplexity | `<think>` tags inline in the content (sonar-reasoning models). |
+
+Inline `<think>` tags are stripped from the answer even when the flag is off, so they
+never pollute a structured-output parse. With streaming on and the flag off, the raw
+SDK chunks are still yielded unchanged.
+
 ---
 
 ## `gemini.py` — `GeminiProvider`
