@@ -1,22 +1,15 @@
 import os
-from typing import Optional, Any, Union, List, Iterator
+from typing import Optional, Any
 from markitdown import MarkItDown
 from utils.logger import get_logger
 from urllib.parse import urlparse
 
-try:
-    from langchain_core.document_loaders import BaseLoader
-    from langchain_core.documents import Document
-except ImportError:
-    class BaseLoader: pass
-    class Document: pass
-
 logger = get_logger("MarkItDownUtils")
 
-class MarkItDownUtils(BaseLoader):
+class MarkItDownUtils:
     """
     A comprehensive utility class for converting various file formats and data sources
-    into Markdown using Microsoft's MarkItDown. Inherits from LangChain's BaseLoader.
+    into Markdown using Microsoft's MarkItDown.
     """
 
     def __init__(
@@ -24,8 +17,7 @@ class MarkItDownUtils(BaseLoader):
         llm_client: Optional[Any] = None, 
         llm_model: Optional[str] = None,
         docintel_endpoint: Optional[str] = None,
-        enable_plugins: bool = True,
-        file_path: Optional[str] = None
+        enable_plugins: bool = True
     ):
         """
         Initializes the MarkItDown converter.
@@ -37,26 +29,6 @@ class MarkItDownUtils(BaseLoader):
             docintel_endpoint=docintel_endpoint,
             enable_plugins=enable_plugins
         )
-        self.file_path = file_path
-
-    def lazy_load(self) -> Iterator[Document]:
-        """
-        Implements LangChain's lazy_load method.
-        """
-        if not self.file_path:
-            raise ValueError("file_path must be provided to use lazy_load()")
-        
-        content = self.convert(self.file_path)
-        yield Document(
-            page_content=content,
-            metadata={"source": self.file_path}
-        )
-
-    def load(self) -> List[Document]:
-        """
-        Implements LangChain's load method.
-        """
-        return list(self.lazy_load())
 
     def convert(self, source: str) -> str:
         """
