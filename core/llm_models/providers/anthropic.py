@@ -22,14 +22,6 @@ logger = get_logger("AnthropicProvider")
 # The Messages API rejects requests without an explicit output cap.
 DEFAULT_MAX_TOKENS = 4096
 
-# Base.reasoning_budget allows "minimal", which Anthropic's effort scale lacks.
-EFFORT_LEVELS = {
-    "minimal": "low",
-    "low": "low",
-    "medium": "medium",
-    "high": "high",
-    "xhigh": "xhigh",
-}
 
 # Extended thinking needs headroom for the response on top of the budget.
 THINKING_OUTPUT_HEADROOM = 1024
@@ -179,22 +171,34 @@ class AnthropicProvider(LLMProvider):
             call_kwargs["tools"] = tools
 
         if reasoning_budget:
+            # Map string effort levels to token budgets since Anthropic only
+            # accepts extended thinking via the 'thinking' dict.
+            EFFORT_TOKEN_BUDGETS = {
+                "minimal": 1024,
+                "low": 2048,
+                "medium": 4096,
+                "high": 8192,
+                "xhigh": 16384,
+            }
+
             if isinstance(reasoning_budget, str):
-                call_kwargs["effort"] = EFFORT_LEVELS.get(
-                    reasoning_budget.lower(), reasoning_budget.lower()
+                budget_tokens = EFFORT_TOKEN_BUDGETS.get(
+                    reasoning_budget.lower(), 4096
                 )
             else:
-                # Explicit thinking budgets require temperature 1 and no nucleus sampling.
-                call_kwargs["thinking"] = {
-                    "type": "enabled",
-                    "budget_tokens": reasoning_budget,
-                }
-                call_kwargs["temperature"] = 1
-                call_kwargs.pop("top_p", None)
-                call_kwargs.pop("top_k", None)
-                call_kwargs["max_tokens"] = max(
-                    max_tokens, reasoning_budget + THINKING_OUTPUT_HEADROOM
-                )
+                budget_tokens = reasoning_budget
+
+            # Explicit thinking budgets require temperature 1 and no nucleus sampling.
+            call_kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": budget_tokens,
+            }
+            call_kwargs["temperature"] = 1
+            call_kwargs.pop("top_p", None)
+            call_kwargs.pop("top_k", None)
+            call_kwargs["max_tokens"] = max(
+                max_tokens, budget_tokens + THINKING_OUTPUT_HEADROOM
+            )
 
         last_exception = None
         max_retries = kwargs.get('max_retries', 3)
