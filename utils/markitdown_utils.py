@@ -6,6 +6,12 @@ from urllib.parse import urlparse
 
 logger = get_logger("MarkItDownUtils")
 
+# Top-level Constants
+DEFAULT_ENABLE_PLUGINS: bool = True
+ALLOWED_URL_SCHEMES: tuple = ("http", "https")
+BLOCKED_HOSTNAMES: set = {"localhost", "0.0.0.0", "[::]"}
+
+
 class MarkItDownUtils:
     """
     A comprehensive utility class for converting various file formats and data sources
@@ -17,7 +23,7 @@ class MarkItDownUtils:
         llm_client: Optional[Any] = None, 
         llm_model: Optional[str] = None,
         docintel_endpoint: Optional[str] = None,
-        enable_plugins: bool = True
+        enable_plugins: bool = DEFAULT_ENABLE_PLUGINS
     ):
         """
         Initializes the MarkItDown converter.
@@ -81,26 +87,24 @@ class MarkItDownUtils:
         """
         try:
             parsed_url = urlparse(url)
-            if parsed_url.scheme not in ['http', 'https']:
-                raise ValueError("Only HTTP/HTTPS protocols are allowed.")
+            if parsed_url.scheme not in ALLOWED_URL_SCHEMES:
+                raise ValueError(f"Only HTTP/HTTPS protocols are allowed. Got '{parsed_url.scheme}'.")
 
             # Block internal, private, loopback, and reserved IPs/hostnames
             hostname = parsed_url.hostname
             if not hostname:
                 raise ValueError("Invalid URL: no hostname found.")
 
-            _BLOCKED_HOSTNAMES = {'localhost', '0.0.0.0', '[::]'}
-            if hostname in _BLOCKED_HOSTNAMES:
-                raise ValueError("Invalid or restricted URL provided.")
+            if hostname in BLOCKED_HOSTNAMES:
+                raise ValueError(f"Invalid or restricted URL hostname: '{hostname}'.")
 
             import ipaddress
             try:
                 ip = ipaddress.ip_address(hostname)
                 if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-                    raise ValueError("Invalid or restricted URL provided.")
+                    raise ValueError(f"Invalid or restricted IP address provided: '{hostname}'.")
             except ValueError:
-                # hostname is a DNS name, not a raw IP — allow it through
-                # (DNS rebinding is out of scope for this static check)
+                # hostname is a DNS name, not a raw IP
                 pass
 
             logger.info(f"Converting URL: {url}")
