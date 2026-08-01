@@ -225,7 +225,7 @@ class CostTracker:
         print("-" * table_width)
 
         successful_calls = [c for c in self._call_history if c.get('status') != 'failed']
-        num_calls = len(self._call_history)
+        num_calls = len(self._call_history) or 1
         num_successful = len(successful_calls) or 1
         avg_duration = sum(c['duration'] for c in self._call_history) / num_calls
         print(
