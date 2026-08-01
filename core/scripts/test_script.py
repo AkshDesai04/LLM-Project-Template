@@ -1,5 +1,4 @@
 import os
-import inspect
 from core.llm_models.router import ModelRouter
 from core.modules.test_module import FileSummaryPrompt
 from utils.logger import get_logger
@@ -41,7 +40,7 @@ def main():
     total_calls = 1000
     indices = list(range(total_calls))
     
-    logger.info(f"Starting parallel execution of 100 LLM calls...")
+    logger.info(f"Starting parallel execution of {total_calls} LLM calls...")
     
     # Execute the calls in parallel
     # We use max_threads=20 to balance speed and system/API stability
