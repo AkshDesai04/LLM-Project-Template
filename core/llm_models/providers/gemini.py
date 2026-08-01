@@ -198,9 +198,6 @@ class GeminiProvider(LLMProvider):
                 response = self.client.models.generate_content(model=model, contents=contents, config=config)
                 total_duration = time.time() - start_time
 
-                if not response.text and not getattr(response, 'parsed', None):
-                    raise ValueError("Received an empty response from Gemini.")
-
                 if response.usage_metadata:
                     u = response.usage_metadata
                     def get_val(obj, attr): return getattr(obj, attr, 0) or 0
@@ -222,9 +219,15 @@ class GeminiProvider(LLMProvider):
 
                     logger.info(f"Gemini Transaction Recorded: ${costs['total_cost']:.6f} total cost")
 
+                # Split thought parts BEFORE checking emptiness, because
+                # response.text can raise ValueError on multi-part responses
+                # that include thought Parts alongside answer Parts.
                 reasoning, answer_text = self._split_thought_parts(
                     getattr(response, 'candidates', None)
                 )
+
+                if not answer_text and not getattr(response, 'parsed', None):
+                    raise ValueError("Received an empty response from Gemini.")
 
                 if structure:
                     return build_result(response.parsed, reasoning, return_reasoning)
