@@ -20,14 +20,20 @@ except ImportError:
 
 logger = get_logger("PerplexityProvider")
 
+# Top-level Constants
+PERPLEXITY_BASE_URL: str = "https://api.perplexity.ai"
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_RETRY_SLEEP_SECONDS: float = 2.0
+
+
 class PerplexityProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
         api_key = api_key or get_secret("PERPLEXITY_KEY")
         super().__init__(api_key, base)
         if OpenAI:
-            self.client = OpenAI(api_key=api_key, base_url="https://api.perplexity.ai")
+            self.client = OpenAI(api_key=api_key, base_url=PERPLEXITY_BASE_URL)
         else:
-            raise ImportError("OpenAI package required for Perplexity routing. Run `pip install openai`")
+            raise ImportError("OpenAI package required for Perplexity routing. Run `pip install openai`.")
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         prompt = getattr(module, 'prompt', "")
@@ -79,7 +85,7 @@ class PerplexityProvider(LLMProvider):
             call_kwargs["stream_options"] = {"include_usage": True}
 
         last_exception = None
-        max_retries = kwargs.get('max_retries', 3)
+        max_retries = kwargs.get('max_retries', DEFAULT_MAX_RETRIES)
 
         logger.info(f"Attempting generation with model: {model}")
         for attempt in range(max_retries):
@@ -165,7 +171,7 @@ class PerplexityProvider(LLMProvider):
             except Exception as e:
                 last_exception = e
                 logger.warning(f"Perplexity response failed on attempt {attempt + 1} for model {model}: {e}")
-                time.sleep(2)
+                time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                 continue
                 
         raise RuntimeError(f"Failed to get response from Perplexity after {max_retries} attempts.") from last_exception
