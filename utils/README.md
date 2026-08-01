@@ -111,13 +111,9 @@ Four small readers. All log to `FileOps` and raise `FileNotFoundError` with the 
 | `read_csv(path)` | `List[Dict[str, str]]` | `csv.DictReader`, fully materialised |
 
 **`read_prompt`** resolves the project root from `__file__`, so it is CWD-independent.
-Pass the bare stem — no directory, no `.txt`. Note the parameter is spelled
-`prompt_tite`, which matters only if you call it by keyword.
+Pass the bare stem — no directory, no `.txt`. The parameter is named `prompt_title`.
 
-**`read_csv`** returns one dict per row keyed by the header. Two caveats: the file is
-opened without `newline=''`, contrary to the `csv` module's recommendation, and short
-rows fill missing keys with `None`, so the `Dict[str, str]` annotation is optimistic.
-`cost_tracker.py` is the main consumer, reading `assets/model_pricing.csv`.
+**`read_csv`** returns one dict per row keyed by the header. `cost_tracker.py` is the main consumer, reading `assets/model_pricing.csv`.
 
 ---
 
@@ -201,16 +197,16 @@ URLs and media into Markdown. Currently standalone — nothing else in the repo 
 | `convert_local(path)` | Refuses to fetch remote content; raises `FileNotFoundError` if missing. |
 | `convert_url(url)` | Only method with input validation — see below. Handles HTML and YouTube transcripts. |
 | `convert_stream(stream, file_extension)` | For in-memory binary data; extension is a format hint like `'.pdf'`. |
-| `convert_image(path, describe=True)` | **`describe` is accepted but unused** — captioning depends solely on whether `llm_client` was supplied. |
+| `convert_image(path, describe=True)` | Specialized image conversion method. |
 | `convert_audio(path)` | Functionally identical to `convert`; exists for readability. |
 
 All methods return `result.text_content` and re-raise on failure after logging. None
 return `None`.
 
-**`convert_url` SSRF guard** blocks `localhost`, `127.0.0.1`, `169.254.169.254` and any
-host starting `10.`, and allows only `http`/`https`. Known gaps: it misses
-`192.168.0.0/16`, `172.16.0.0/12`, other `127.x` addresses, IPv6 `::1`, and DNS names
-that resolve to private IPs. Treat it as a speed bump, not a boundary.
+**`convert_url` SSRF guard** checks schemes against `ALLOWED_URL_SCHEMES` (`http`/`https`)
+and uses Python's `ipaddress` module to block private (`is_private`), loopback (`is_loopback`),
+link-local (`is_link_local`), and reserved (`is_reserved`) IP addresses as well as `BLOCKED_HOSTNAMES`
+(`localhost`, `0.0.0.0`, `[::]`).
 
 **Hard dependency:** `from markitdown import MarkItDown` is a top-level import with no
 guard, so importing this module fails if `markitdown` is absent.
