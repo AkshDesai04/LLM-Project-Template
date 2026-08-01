@@ -147,9 +147,9 @@ Key: `ANTHROPIC_KEY`.
   `emit_structured_response` and pins `tool_choice` to it, then reads the arguments back
   and validates them.
 - **System prompt** is a top-level `system` argument, not a message.
-- **Reasoning:** a string `reasoning_budget` maps through `EFFORT_LEVELS` onto the
-  `effort` scale (note `"minimal"` is folded to `"low"`, since Anthropic has no
-  equivalent). An integer budget enables extended thinking, which forces
+- **Reasoning:** a string `reasoning_budget` maps through `EFFORT_TOKEN_BUDGETS` onto
+  explicit token budgets (`minimal`: 1024, `low`: 2048, `medium`: 4096, `high`: 8192, `xhigh`: 16384).
+  Extended thinking uses `thinking={"type": "enabled", "budget_tokens": ...}`, forces
   `temperature=1`, drops `top_p`/`top_k`, and raises `max_tokens` by
   `THINKING_OUTPUT_HEADROOM = 1024`.
 - **`_to_content_blocks`** converts the OpenAI-shaped payloads from `media_utils` into
@@ -168,12 +168,10 @@ Key: `PERPLEXITY_KEY`. Uses the `openai` SDK with
 Supports the search-specific settings from the module config: `search_domain_filter`,
 `return_citations`, `search_recency_filter`.
 
-Three limitations worth knowing before you pick this provider:
+Features:
 
-- **`structure` is ignored entirely.** There is no structured-output path; you always
-  get a string back.
-- **`evaluate_response` returns a hardcoded `score=5`**, with the model's actual
-  judgement stuffed into the `reasoning` field. It is not a usable numeric score.
+- **`evaluate_response`** requests a JSON-structured `JudgeResult` response from the model,
+  parses it via `json.loads`, and validates it using `JudgeResult.model_validate()`.
 - **`upload_media` only handles `text/plain`.** Anything else returns the placeholder
   string `"[Media of type {mime_type} attached]"`.
 - **`embed_content` raises `NotImplementedError`.**
