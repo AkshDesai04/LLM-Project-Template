@@ -634,11 +634,12 @@ class OpenAIProvider(LLMProvider):
     def embed_content(
         self,
         text: Union[str, List[str]],
-        model="text-embedding-3-small",
+        model: Optional[str] = None,
         **kwargs
     ) -> Union[List[float], List[List[float]]]:
 
         try:
+            model = model or self.model_name
             input_data = [text] if isinstance(text, str) else text
 
             start_time = time.time()
@@ -707,6 +708,6 @@ class OpenAIProvider(LLMProvider):
         class JudgeModule(BaseModule):
             prompt: str = judge_prompt
             structure: Any = JudgeResult
-            model: str = "gpt-4o-mini"
+            model: str = self.model_name
 
         return self.model_response(JudgeModule())

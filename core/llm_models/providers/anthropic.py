@@ -369,6 +369,6 @@ class AnthropicProvider(LLMProvider):
         class JudgeModule(BaseModule):
             prompt: str = judge_prompt
             structure: Any = JudgeResult
-            model: str = "claude-haiku-4-5"
+            model: str = self.model_name
 
         return self.model_response(JudgeModule())

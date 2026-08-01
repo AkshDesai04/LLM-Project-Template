@@ -18,7 +18,7 @@ class JudgeResult(BaseModel):
 class LLMProvider(ABC):
     def __init__(self, api_key: Optional[str], base_config: BaseModule):
         self.api_key = api_key
-        self.model_name = base_config.model
+        self.model_name = base_config.model or (base_config.models[0] if getattr(base_config, 'models', None) else None)
         self.temperature = base_config.temperature
         self.top_p = base_config.top_p
         self.top_k = base_config.top_k

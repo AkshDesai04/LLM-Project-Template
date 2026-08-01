@@ -278,8 +278,9 @@ class GeminiProvider(LLMProvider):
             logger.error(f"Gemini upload failed: {e}")
             raise RuntimeError(f"Failed to upload {mime_type} to Gemini: {e}")
 
-    def embed_content(self, text: Union[str, List[str]], task_type: str = "RETRIEVAL_DOCUMENT", model="gemini-embedding-001", dimensions=1536, **kwargs) -> Union[List[float], List[List[float]]]:
+    def embed_content(self, text: Union[str, List[str]], task_type: str = "RETRIEVAL_DOCUMENT", model: Optional[str] = None, dimensions=1536, **kwargs) -> Union[List[float], List[List[float]]]:
         try:
+            model = model or self.model_name
             input_texts = [text] if isinstance(text, str) else text
             start_time = time.time()
             result = self.client.models.embed_content(
@@ -331,6 +332,6 @@ class GeminiProvider(LLMProvider):
         class JudgeModule(BaseModule):
             prompt: str = judge_prompt
             structure: Any = JudgeResult
-            model: str = "gemini-2.0-flash"
+            model: str = self.model_name
 
         return self.model_response(JudgeModule())

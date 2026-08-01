@@ -189,7 +189,7 @@ class PerplexityProvider(LLMProvider):
         """
         class JudgeModule(BaseModule):
             prompt: str = judge_prompt
-            model: str = "sonar-pro"
+            model: str = self.model_name
 
         raw_output = self.model_response(JudgeModule())
         return JudgeResult(score=5, reasoning=raw_output, improvements="")
