@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import unquote, urlparse
 
 try:
-    import oracle_db
     import oracledb
     ORACLEDB_AVAILABLE = True
 except ImportError:

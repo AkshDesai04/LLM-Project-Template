@@ -1,7 +1,7 @@
 import time
 from typing import Any, Optional, List, Union
 
-from utils.logger import get_logger
+from utils.logging import get_logger
 from core.modules.base import Base as BaseModule
 from .base_provider import LLMProvider, JudgeResult
 from .cost_tracker import cost_tracker

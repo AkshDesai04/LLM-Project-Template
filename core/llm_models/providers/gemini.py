@@ -6,8 +6,8 @@ from google import genai
 from google.genai import types
 from google.genai.types import ThinkingLevel
 
-from utils.logger import get_logger
-from utils.env_ops import (
+from utils.logging import get_logger
+from utils.env import (
     get_secret,
     get_gemini_key_type,
     load_gemini_service_account_credentials,

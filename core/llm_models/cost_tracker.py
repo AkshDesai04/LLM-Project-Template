@@ -1,9 +1,10 @@
 import os
 import atexit
+import threading
 from typing import Optional, Dict
 
-from utils.logger import get_logger
-from utils.file_ops import read_csv
+from utils.logging import get_logger
+from utils.io import read_csv
 from .model_names import strip_provider_prefix
 
 logger = get_logger("CostTracker")
@@ -18,14 +19,18 @@ PRICING_CSV_RELATIVE_PATH = os.path.join("assets", "model_pricing.csv")
 class CostTracker:
     _instance = None
     _exit_handler_registered = False
+    _class_lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(CostTracker, cls).__new__(cls)
-            cls._instance._initialize()
+            with cls._class_lock:
+                if cls._instance is None:
+                    cls._instance = super(CostTracker, cls).__new__(cls)
+                    cls._instance._initialize()
         return cls._instance
 
     def _initialize(self):
+        self._lock = threading.Lock()
         self._call_history = []
         self._total_input_cost = 0.0
         self._total_output_cost = 0.0
@@ -153,24 +158,25 @@ class CostTracker:
         status: str = "success",
     ):
         """Records a single transaction and updates global metrics."""
-        self._call_history.append({
-            "module": module_name,
-            "model": model_name,
-            "duration": duration,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cached_tokens": cached_tokens,
-            "status": status,
-            **costs
-        })
-        if status == "success":
-            self._total_input_cost += costs["input_cost"]
-            self._total_output_cost += costs["output_cost"]
-            self._total_cached_cost += costs["cached_cost"]
-            self._total_overall_cost += costs["total_cost"]
-            self._total_input_tokens += input_tokens
-            self._total_output_tokens += output_tokens
-            self._total_cached_tokens += cached_tokens
+        with self._lock:
+            self._call_history.append({
+                "module": module_name,
+                "model": model_name,
+                "duration": duration,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cached_tokens": cached_tokens,
+                "status": status,
+                **costs
+            })
+            if status == "success":
+                self._total_input_cost += costs["input_cost"]
+                self._total_output_cost += costs["output_cost"]
+                self._total_cached_cost += costs["cached_cost"]
+                self._total_overall_cost += costs["total_cost"]
+                self._total_input_tokens += input_tokens
+                self._total_output_tokens += output_tokens
+                self._total_cached_tokens += cached_tokens
 
     def record_failed_attempt(
         self,
@@ -180,20 +186,21 @@ class CostTracker:
         error: Optional[Exception] = None,
     ):
         """Records a failed model attempt with zero tokens and zero cost."""
-        self._call_history.append({
-            "module": module_name,
-            "model": model_name,
-            "duration": duration,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cached_tokens": 0,
-            "status": "failed",
-            "input_cost": 0.0,
-            "output_cost": 0.0,
-            "cached_cost": 0.0,
-            "total_cost": 0.0,
-            "error": str(error) if error else None,
-        })
+        with self._lock:
+            self._call_history.append({
+                "module": module_name,
+                "model": model_name,
+                "duration": duration,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cached_tokens": 0,
+                "status": "failed",
+                "input_cost": 0.0,
+                "output_cost": 0.0,
+                "cached_cost": 0.0,
+                "total_cost": 0.0,
+                "error": str(error) if error else None,
+            })
         if error:
             logger.warning(f"Recorded failed attempt for model '{model_name}': {error}")
 

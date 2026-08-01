@@ -6,7 +6,7 @@ from typing import List
 import cv2
 import PyPDF2
 
-from utils.logger import get_logger
+from utils.logging import get_logger
 
 logger = get_logger("MediaUtils")
 
