@@ -19,14 +19,22 @@ from core.modules.base import Base as BaseModule
 
 logger = get_logger("AnthropicProvider")
 
-# The Messages API rejects requests without an explicit output cap.
-DEFAULT_MAX_TOKENS = 4096
+# Top-level Constants
+DEFAULT_MAX_TOKENS: int = 4096
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_RETRY_SLEEP_SECONDS: float = 2.0
+DEFAULT_THINKING_TEMPERATURE: float = 1.0
+THINKING_OUTPUT_HEADROOM: int = 1024
+STRUCTURED_TOOL_NAME: str = "emit_structured_response"
 
-
-# Extended thinking needs headroom for the response on top of the budget.
-THINKING_OUTPUT_HEADROOM = 1024
-
-STRUCTURED_TOOL_NAME = "emit_structured_response"
+# Effort level mapping to token budgets for Anthropic extended thinking
+EFFORT_TOKEN_BUDGETS: dict = {
+    "minimal": 1024,
+    "low": 2048,
+    "medium": 4096,
+    "high": 8192,
+    "xhigh": 16384,
+}
 
 
 class AnthropicProvider(LLMProvider):
@@ -171,19 +179,9 @@ class AnthropicProvider(LLMProvider):
             call_kwargs["tools"] = tools
 
         if reasoning_budget:
-            # Map string effort levels to token budgets since Anthropic only
-            # accepts extended thinking via the 'thinking' dict.
-            EFFORT_TOKEN_BUDGETS = {
-                "minimal": 1024,
-                "low": 2048,
-                "medium": 4096,
-                "high": 8192,
-                "xhigh": 16384,
-            }
-
             if isinstance(reasoning_budget, str):
                 budget_tokens = EFFORT_TOKEN_BUDGETS.get(
-                    reasoning_budget.lower(), 4096
+                    reasoning_budget.lower(), DEFAULT_MAX_TOKENS
                 )
             else:
                 budget_tokens = reasoning_budget
@@ -193,7 +191,7 @@ class AnthropicProvider(LLMProvider):
                 "type": "enabled",
                 "budget_tokens": budget_tokens,
             }
-            call_kwargs["temperature"] = 1
+            call_kwargs["temperature"] = DEFAULT_THINKING_TEMPERATURE
             call_kwargs.pop("top_p", None)
             call_kwargs.pop("top_k", None)
             call_kwargs["max_tokens"] = max(
@@ -201,7 +199,7 @@ class AnthropicProvider(LLMProvider):
             )
 
         last_exception = None
-        max_retries = kwargs.get('max_retries', 3)
+        max_retries = kwargs.get('max_retries', DEFAULT_MAX_RETRIES)
 
         logger.info(f"Attempting generation with model: {model}")
         for attempt in range(max_retries):
@@ -327,7 +325,7 @@ class AnthropicProvider(LLMProvider):
                 logger.warning(
                     f"Anthropic response failed on attempt {attempt + 1} for model {model}: {e}"
                 )
-                time.sleep(2)
+                time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                 continue
 
         raise RuntimeError(
