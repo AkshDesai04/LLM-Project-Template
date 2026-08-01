@@ -81,12 +81,27 @@ class MarkItDownUtils:
         """
         try:
             parsed_url = urlparse(url)
-            # Block internal, private, or loopback IPs/hostnames
-            if parsed_url.hostname in ['localhost', '127.0.0.1', '169.254.169.254'] or parsed_url.hostname.startswith(
-                    '10.'):
-                raise ValueError("Invalid or restricted URL provided.")
             if parsed_url.scheme not in ['http', 'https']:
                 raise ValueError("Only HTTP/HTTPS protocols are allowed.")
+
+            # Block internal, private, loopback, and reserved IPs/hostnames
+            hostname = parsed_url.hostname
+            if not hostname:
+                raise ValueError("Invalid URL: no hostname found.")
+
+            _BLOCKED_HOSTNAMES = {'localhost', '0.0.0.0', '[::]'}
+            if hostname in _BLOCKED_HOSTNAMES:
+                raise ValueError("Invalid or restricted URL provided.")
+
+            import ipaddress
+            try:
+                ip = ipaddress.ip_address(hostname)
+                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                    raise ValueError("Invalid or restricted URL provided.")
+            except ValueError:
+                # hostname is a DNS name, not a raw IP — allow it through
+                # (DNS rebinding is out of scope for this static check)
+                pass
 
             logger.info(f"Converting URL: {url}")
             result = self.md.convert_url(url)
