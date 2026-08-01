@@ -12,7 +12,8 @@ def main():
     prompt_module.stream = True
     
     router = ModelRouter(prompt_module)
-    print(f"Calling model_response for {prompt_module.model}...")
+    active_model = prompt_module.model or (prompt_module.models[0] if prompt_module.models else "unknown")
+    print(f"Calling model_response for {active_model}...")
     response = router.model_response(prompt_module)
     
     print(f"Response type: {type(response)}")
