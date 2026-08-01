@@ -118,7 +118,7 @@ class ModelRouter:
             provider = PROVIDER_ANTHROPIC
         elif model_name_lower.startswith(("sonar", "perplexity")):
             provider = PROVIDER_PERPLEXITY
-        elif model_name_lower.startswith(("mistral", "phi", "qwen")):
+        elif model_name_lower.startswith(("mistral", "phi", "qwen", "deepseek", "codestral", "command")):
             provider = PROVIDER_OLLAMA
         elif model_name_lower.startswith("llama"):
             provider = PROVIDER_PERPLEXITY
