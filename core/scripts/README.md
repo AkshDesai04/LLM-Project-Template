@@ -45,21 +45,21 @@ which is the contract `parallel_execute` expects.
   passing it is strongly advisable against a metered API.
 - **`results/` is written relative to the current working directory**, so where output
   lands depends on where you ran it from.
+- **`results/` is written relative to the current working directory**, so where output
+  lands depends on where you ran it from.
 - The cost tracker prints its full itemized summary at exit, which for 1000 calls is a
   very long table.
-- Minor: the log line says "100 LLM calls" while the code runs 1000, and `inspect` and
-  `os` are imported but `inspect` is unused.
 
 ## Related scripts outside this directory
 
-Two live at the project root rather than here:
+One lives at the project root rather than here:
 
 - **`repro_stream.py`** — minimal streaming repro. Forces `stream = True` on a
   `FileSummaryPrompt`, then checks whether the response is a generator and drains it.
   Its chunk handling assumes Ollama's dict shape and prints a placeholder for anything
   else, so it is most useful against a local model.
-- **`model_router.py`** — a 15-line orphaned stub class, unrelated to the real
-  `core/llm_models/router.py`. Nothing imports it. Safe to delete.
+- Note: The root `model_router.py` file previously present was an unused stub that
+  shadowed `core.llm_models.router.ModelRouter` and was removed.
 
 ## Adding a script
 
