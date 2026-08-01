@@ -7,23 +7,101 @@ from google.genai import types
 from google.genai.types import ThinkingLevel
 
 from utils.logger import get_logger
-from utils.env_ops import get_local_secret
+from utils.env_ops import (
+    get_secret,
+    get_gemini_key_type,
+    load_gemini_service_account_credentials,
+    resolve_gemini_project,
+    resolve_gemini_location,
+    GEMINI_KEY_TYPE_API_KEY,
+    GEMINI_KEY_TYPE_SERVICE_ACC_JSON,
+    GEMINI_API_KEY_NAME,
+)
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
+from ..reasoning import build_result, join_reasoning, resolve_return_reasoning
 from core.modules.base import Base as BaseModule
 
 logger = get_logger("GeminiProvider")
 
+# Top-level Constants
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_RETRY_SLEEP_SECONDS: float = 2.0
+DEFAULT_EMBED_TASK_TYPE: str = "RETRIEVAL_DOCUMENT"
+DEFAULT_EMBED_DIMENSIONS: int = 1536
+FILE_PROCESSING_POLL_INTERVAL: float = 2.0
+VERTEX_SENTINEL_KEY: str = "vertex-service-account"
+
+
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
-        api_key = api_key or get_local_secret("GEMINI_KEY")
-        super().__init__(api_key, base)
-        self.client = genai.Client(api_key=api_key)
+        key_type = get_gemini_key_type()
+        self.key_type = key_type
+        self.uses_vertex = key_type == GEMINI_KEY_TYPE_SERVICE_ACC_JSON
+
+        # LLMProvider stores self.api_key; for Vertex we keep a sentinel rather
+        # than the service-account JSON itself.
+        if key_type == GEMINI_KEY_TYPE_API_KEY:
+            resolved_key = api_key or get_secret(GEMINI_API_KEY_NAME)
+        else:
+            resolved_key = api_key or VERTEX_SENTINEL_KEY
+
+        super().__init__(resolved_key, base)
+        self.client = self._build_client(api_key)
+
+    def _build_client(self, api_key: Optional[str]):
+        """
+        Builds a google-genai Client for the credential type set by
+        GEMINI_KEY_TYPE in .env.
+
+        GEMINI_KEY       -> Gemini Developer API (client.files.upload available)
+        SERVICE_ACC_JSON -> Vertex AI (inline Parts; Files API unavailable)
+        """
+        if self.key_type == GEMINI_KEY_TYPE_API_KEY:
+            key = api_key or get_secret(GEMINI_API_KEY_NAME)
+            logger.info("Initializing Gemini client with API key auth.")
+            return genai.Client(api_key=key)
+
+        credentials = load_gemini_service_account_credentials()
+        project = resolve_gemini_project(credentials)
+        location = resolve_gemini_location()
+        logger.info(
+            f"Initializing Gemini client with Vertex AI service-account auth "
+            f"(project={project}, location={location})."
+        )
+        return genai.Client(
+            vertexai=True,
+            project=project,
+            location=location,
+            credentials=credentials,
+        )
+
+    @staticmethod
+    def _split_thought_parts(candidates: Any) -> tuple:
+        """
+        Gemini returns thoughts as ordinary Parts flagged with thought=True,
+        mixed in with the answer. Returns (reasoning, answer_text).
+        """
+        thoughts = []
+        answers = []
+
+        for candidate in candidates or []:
+            content = getattr(candidate, 'content', None)
+            for part in getattr(content, 'parts', None) or []:
+                text = getattr(part, 'text', None)
+                if not text:
+                    continue
+                if getattr(part, 'thought', False):
+                    thoughts.append(text)
+                else:
+                    answers.append(text)
+
+        return join_reasoning(thoughts), "".join(answers)
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         prompt = getattr(module, 'prompt', "")
         structure = kwargs.get('schema') or kwargs.get('structure') or getattr(module, 'structure', None)
-        base_model = kwargs.get('model', self.model_name)
+        model = kwargs.get('model', self.model_name)
         
         top_p = kwargs.get('top_p', getattr(module, 'top_p', self.top_p))
         top_k = kwargs.get('top_k', getattr(module, 'top_k', self.top_k))
@@ -43,6 +121,7 @@ class GeminiProvider(LLMProvider):
         tools = kwargs.get('tools') or kwargs.get('function') or getattr(module, 'tools', self.tools)
         safety_settings = kwargs.get('safety_settings', getattr(module, 'safety_settings', self.safety_settings))
         stream = kwargs.get('stream', getattr(module, 'stream', self.stream))
+        return_reasoning = resolve_return_reasoning(module, kwargs, self.return_reasoning)
 
         contents: List[Any] = [prompt]
         if uploaded_file:
@@ -52,104 +131,151 @@ class GeminiProvider(LLMProvider):
                 contents.append(uploaded_file)
 
         last_exception = None
-        max_retries = kwargs.get('max_retries', 3)
-        fallbacks = self.fall_back_models or []
-        models_to_try = [base_model] + fallbacks
+        max_retries = kwargs.get('max_retries', DEFAULT_MAX_RETRIES)
 
-        for model in models_to_try:
+        logger.info(f"Attempting generation with model: {model}")
+        for attempt in range(max_retries):
             try:
-                cost_tracker.calculate_cost(model, 0, 0)
-            except ValueError as e:
-                logger.warning(f"Skipping model {model} due to pricing check: {e}")
-                last_exception = e
-                continue
+                logger.info(f"Attempt {attempt + 1}/{max_retries} for model {model}")
 
-            logger.info(f"Attempting generation with model: {model}")
-            for attempt in range(max_retries):
-                try:
-                    logger.info(f"Attempt {attempt + 1}/{max_retries} for model {model}")
+                thinking_config_obj = None
+                if reasoning_budget:
+                    if isinstance(reasoning_budget, str):
+                        reasoning = ThinkingLevel(reasoning_budget)
+                        thinking_config_obj = types.ThinkingConfig(include_thoughts=True, thinking_level=reasoning)
+                    else:
+                        thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
+                elif return_reasoning:
+                    # Thought Parts are only returned when they are asked for, so
+                    # the flag alone has to switch them on.
+                    thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
 
-                    thinking_config_obj = None
-                    if reasoning_budget:
-                        if isinstance(reasoning_budget, str):
-                            reasoning = ThinkingLevel(reasoning_budget)
-                            thinking_config_obj = types.ThinkingConfig(include_thoughts=True, thinking_level=reasoning)
-                        else:
-                            thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
+                config = types.GenerateContentConfig(
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    response_mime_type=response_mime_type,
+                    response_schema=structure,
+                    thinking_config=thinking_config_obj,
+                    system_instruction=system_prompt,
+                    candidate_count=candidate_count,
+                    max_output_tokens=max_output_tokens,
+                    stop_sequences=stop_sequences,
+                    presence_penalty=presence_penalty,
+                    frequency_penalty=frequency_penalty,
+                    seed=seed,
+                    tools=tools,
+                    safety_settings=safety_settings
+                )
 
-                    config = types.GenerateContentConfig(
-                        temperature=temperature,
-                        top_p=top_p,
-                        top_k=top_k,
-                        response_mime_type=response_mime_type,
-                        response_schema=structure,
-                        thinking_config=thinking_config_obj,
-                        system_instruction=system_prompt,
-                        candidate_count=candidate_count,
-                        max_output_tokens=max_output_tokens,
-                        stop_sequences=stop_sequences,
-                        presence_penalty=presence_penalty,
-                        frequency_penalty=frequency_penalty,
-                        seed=seed,
-                        tools=tools,
-                        safety_settings=safety_settings
-                    )
+                start_time = time.time()
+                if stream:
+                    response_stream = self.client.models.generate_content_stream(model=model, contents=contents, config=config)
+                    
+                    def stream_wrapper():
+                        last_prompt_tokens = 0
+                        last_candidate_tokens = 0
+                        last_cached_tokens = 0
+                        cost_recorded = False
 
-                    start_time = time.time()
-                    if stream:
-                        response_stream = self.client.models.generate_content_stream(model=model, contents=contents, config=config)
-                        
-                        def stream_wrapper():
+                        try:
                             for chunk in response_stream:
                                 if chunk.usage_metadata:
                                     u = chunk.usage_metadata
                                     def get_val(obj, attr): return getattr(obj, attr, 0) or 0
                                     
-                                    prompt_tokens = get_val(u, 'prompt_token_count')
-                                    candidate_tokens = get_val(u, 'candidates_token_count')
-                                    cached_tokens = get_val(u, 'cached_content_token_count')
+                                    last_prompt_tokens = get_val(u, 'prompt_token_count')
+                                    last_candidate_tokens = get_val(u, 'candidates_token_count')
+                                    last_cached_tokens = get_val(u, 'cached_content_token_count')
 
-                                    total_duration = time.time() - start_time
-                                    costs = cost_tracker.calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
-                                    cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
-                                    logger.info(f"Gemini Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
-                                yield chunk
-                        return stream_wrapper()
+                                if return_reasoning:
+                                    chunk_reasoning, chunk_text = self._split_thought_parts(
+                                        getattr(chunk, 'candidates', None)
+                                    )
+                                    yield [chunk_text, chunk_reasoning]
+                                else:
+                                    yield chunk
+                        finally:
+                            if not cost_recorded:
+                                total_duration = time.time() - start_time
+                                costs = cost_tracker.calculate_cost(model, last_prompt_tokens, last_candidate_tokens, last_cached_tokens)
+                                cost_tracker.record_transaction(
+                                    type(module).__name__,
+                                    model,
+                                    costs,
+                                    total_duration,
+                                    input_tokens=last_prompt_tokens,
+                                    output_tokens=last_candidate_tokens,
+                                    cached_tokens=last_cached_tokens,
+                                )
+                                cost_recorded = True
+                                logger.info(f"Gemini Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
+                    return stream_wrapper()
 
-                    response = self.client.models.generate_content(model=model, contents=contents, config=config)
-                    total_duration = time.time() - start_time
+                response = self.client.models.generate_content(model=model, contents=contents, config=config)
+                total_duration = time.time() - start_time
 
-                    if not response.text and not getattr(response, 'parsed', None):
-                        raise ValueError("Received an empty response from Gemini.")
+                if response.usage_metadata:
+                    u = response.usage_metadata
+                    def get_val(obj, attr): return getattr(obj, attr, 0) or 0
+                    
+                    prompt_tokens = get_val(u, 'prompt_token_count')
+                    candidate_tokens = get_val(u, 'candidates_token_count')
+                    cached_tokens = get_val(u, 'cached_content_token_count')
 
-                    if response.usage_metadata:
-                        u = response.usage_metadata
-                        def get_val(obj, attr): return getattr(obj, attr, 0) or 0
-                        
-                        prompt_tokens = get_val(u, 'prompt_token_count')
-                        candidate_tokens = get_val(u, 'candidates_token_count')
-                        cached_tokens = get_val(u, 'cached_content_token_count')
+                    costs = cost_tracker.calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
+                    cost_tracker.record_transaction(
+                        type(module).__name__,
+                        model,
+                        costs,
+                        total_duration,
+                        input_tokens=prompt_tokens,
+                        output_tokens=candidate_tokens,
+                        cached_tokens=cached_tokens,
+                    )
 
-                        costs = cost_tracker.calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
-                        cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
+                    logger.info(f"Gemini Transaction Recorded: ${costs['total_cost']:.6f} total cost")
 
-                        logger.info(f"Gemini Transaction Recorded: ${costs['total_cost']:.6f} total cost")
+                # Split thought parts BEFORE checking emptiness, because
+                # response.text can raise ValueError on multi-part responses
+                # that include thought Parts alongside answer Parts.
+                reasoning, answer_text = self._split_thought_parts(
+                    getattr(response, 'candidates', None)
+                )
 
-                    if structure:
-                        return response.parsed
-                    return response.text
+                if not answer_text and not getattr(response, 'parsed', None):
+                    raise ValueError("Received an empty response from Gemini.")
 
-                except Exception as e:
-                    last_exception = e
-                    logger.warning(f"Gemini response failed on attempt {attempt + 1} for model {model}: {e}")
-                    time.sleep(2)
-                    continue
-            break 
+                if structure:
+                    return build_result(response.parsed, reasoning, return_reasoning)
 
-        raise RuntimeError("Failed to get response from Gemini after trying all specified models.") from last_exception
+                # response.text spans every Part, so prefer the thought-free
+                # text when thoughts were included.
+                return build_result(
+                    answer_text or response.text, reasoning, return_reasoning
+                )
 
-    def upload_media(self, file_bytes: bytes, mime_type: str) -> types.File:
+            except Exception as e:
+                last_exception = e
+                logger.warning(f"Gemini response failed on attempt {attempt + 1} for model {model}: {e}")
+                time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
+                continue
+
+        raise RuntimeError(
+            f"Failed to get response from Gemini model {model} after {max_retries} attempts."
+        ) from last_exception
+
+    def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:
         try:
+            # Vertex AI rejects the Developer Files API. Inline the bytes as a
+            # Part so callers keep the same upload_media -> model_response flow.
+            if self.uses_vertex:
+                logger.info(
+                    f"Inlining {mime_type} as a Part for Vertex AI "
+                    f"(Files API is unavailable under service-account auth)."
+                )
+                return types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+
             logger.info(f"Uploading {mime_type} to Gemini...")
             file_obj = BytesIO(file_bytes)
             file_obj.seek(0)
@@ -161,7 +287,7 @@ class GeminiProvider(LLMProvider):
 
             while uploaded_file.state.name == "PROCESSING":
                 logger.info(f"File {uploaded_file.name} is still processing...")
-                time.sleep(2)
+                time.sleep(FILE_PROCESSING_POLL_INTERVAL)
                 uploaded_file = self.client.files.get(name=uploaded_file.name)
 
             if uploaded_file.state.name == "FAILED":
@@ -172,8 +298,9 @@ class GeminiProvider(LLMProvider):
             logger.error(f"Gemini upload failed: {e}")
             raise RuntimeError(f"Failed to upload {mime_type} to Gemini: {e}")
 
-    def embed_content(self, text: Union[str, List[str]], task_type: str = "RETRIEVAL_DOCUMENT", model="gemini-embedding-001", dimensions=1536, **kwargs) -> Union[List[float], List[List[float]]]:
+    def embed_content(self, text: Union[str, List[str]], task_type: str = DEFAULT_EMBED_TASK_TYPE, model: Optional[str] = None, dimensions: int = DEFAULT_EMBED_DIMENSIONS, **kwargs) -> Union[List[float], List[List[float]]]:
         try:
+            model = model or self.model_name
             input_texts = [text] if isinstance(text, str) else text
             start_time = time.time()
             result = self.client.models.embed_content(
@@ -196,7 +323,15 @@ class GeminiProvider(LLMProvider):
 
             if prompt_tokens > 0:
                 costs = cost_tracker.calculate_cost(model, prompt_tokens, 0, 0)
-                cost_tracker.record_transaction("Embedding", model, costs, total_duration)
+                cost_tracker.record_transaction(
+                    "Embedding",
+                    model,
+                    costs,
+                    total_duration,
+                    input_tokens=prompt_tokens,
+                    output_tokens=0,
+                    cached_tokens=0,
+                )
 
             if isinstance(text, str):
                 return result.embeddings[0].values
@@ -217,6 +352,6 @@ class GeminiProvider(LLMProvider):
         class JudgeModule(BaseModule):
             prompt: str = judge_prompt
             structure: Any = JudgeResult
-            model: str = "gemini-2.0-flash"
+            model: str = self.model_name
 
         return self.model_response(JudgeModule())

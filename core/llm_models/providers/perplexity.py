@@ -2,9 +2,15 @@ import time
 from typing import Any, Optional, List, Union
 
 from utils.logger import get_logger
-from utils.env_ops import get_local_secret
+from utils.env_ops import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
+from ..reasoning import (
+    ThinkTagStreamSplitter,
+    build_result,
+    resolve_return_reasoning,
+    split_think_tags,
+)
 from core.modules.base import Base as BaseModule
 
 try:
@@ -14,14 +20,20 @@ except ImportError:
 
 logger = get_logger("PerplexityProvider")
 
+# Top-level Constants
+PERPLEXITY_BASE_URL: str = "https://api.perplexity.ai"
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_RETRY_SLEEP_SECONDS: float = 2.0
+
+
 class PerplexityProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
-        api_key = api_key or get_local_secret("PERPLEXITY_KEY")
+        api_key = api_key or get_secret("PERPLEXITY_KEY")
         super().__init__(api_key, base)
         if OpenAI:
-            self.client = OpenAI(api_key=api_key, base_url="https://api.perplexity.ai")
+            self.client = OpenAI(api_key=api_key, base_url=PERPLEXITY_BASE_URL)
         else:
-            raise ImportError("OpenAI package required for Perplexity routing. Run `pip install openai`")
+            raise ImportError("OpenAI package required for Perplexity routing. Run `pip install openai`.")
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         prompt = getattr(module, 'prompt', "")
@@ -37,6 +49,7 @@ class PerplexityProvider(LLMProvider):
         return_citations = kwargs.get('return_citations', getattr(module, 'return_citations', self.return_citations))
         search_recency_filter = kwargs.get('search_recency_filter', getattr(module, 'search_recency_filter', self.search_recency_filter))
         stream = kwargs.get('stream', getattr(module, 'stream', self.stream))
+        return_reasoning = resolve_return_reasoning(module, kwargs, self.return_reasoning)
 
         messages = []
         if system_prompt:
@@ -72,7 +85,7 @@ class PerplexityProvider(LLMProvider):
             call_kwargs["stream_options"] = {"include_usage": True}
 
         last_exception = None
-        max_retries = kwargs.get('max_retries', 3)
+        max_retries = kwargs.get('max_retries', DEFAULT_MAX_RETRIES)
 
         logger.info(f"Attempting generation with model: {model}")
         for attempt in range(max_retries):
@@ -84,6 +97,8 @@ class PerplexityProvider(LLMProvider):
 
                 if stream:
                     def stream_wrapper():
+                        splitter = ThinkTagStreamSplitter()
+
                         for chunk in response:
                             if getattr(chunk, 'usage', None):
                                 u = chunk.usage
@@ -96,9 +111,33 @@ class PerplexityProvider(LLMProvider):
                                 except ValueError:
                                     costs = {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
 
-                                cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
+                                cost_tracker.record_transaction(
+                                    type(module).__name__,
+                                    model,
+                                    costs,
+                                    total_duration,
+                                    input_tokens=prompt_tokens,
+                                    output_tokens=completion_tokens,
+                                    cached_tokens=0,
+                                )
                                 logger.info(f"Perplexity Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
-                            yield chunk
+
+                            if not return_reasoning:
+                                yield chunk
+                                continue
+
+                            delta = getattr(
+                                (chunk.choices or [None])[0], 'delta', None
+                            ) if getattr(chunk, 'choices', None) else None
+
+                            text, thought = splitter.feed(getattr(delta, 'content', None))
+                            if text or thought:
+                                yield [text, thought]
+
+                        if return_reasoning:
+                            text, thought = splitter.flush()
+                            if text or thought:
+                                yield [text, thought]
                     return stream_wrapper()
 
                 total_duration = time.time() - start_time
@@ -114,14 +153,25 @@ class PerplexityProvider(LLMProvider):
                     except ValueError:
                         costs = {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
 
-                    cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
+                    cost_tracker.record_transaction(
+                        type(module).__name__,
+                        model,
+                        costs,
+                        total_duration,
+                        input_tokens=prompt_tokens,
+                        output_tokens=completion_tokens,
+                        cached_tokens=0,
+                    )
 
-                return output_content
+                # sonar-reasoning inlines its chain of thought in the content.
+                output_content, reasoning = split_think_tags(output_content)
+
+                return build_result(output_content, reasoning, return_reasoning)
 
             except Exception as e:
                 last_exception = e
                 logger.warning(f"Perplexity response failed on attempt {attempt + 1} for model {model}: {e}")
-                time.sleep(2)
+                time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                 continue
                 
         raise RuntimeError(f"Failed to get response from Perplexity after {max_retries} attempts.") from last_exception
@@ -142,10 +192,18 @@ class PerplexityProvider(LLMProvider):
         [AI Generated Response]: {generated_output}
         [Evaluation Rubric]: {rubric if rubric else "Evaluate based on accuracy, clarity, and adherence to the prompt."}
         Please provide a score from 1-10, your reasoning, and any suggestions for improvement.
+        Return your response in JSON format with fields: score (int), reasoning (str), improvements (str).
         """
         class JudgeModule(BaseModule):
             prompt: str = judge_prompt
-            model: str = "sonar-pro"
+            response_mime_type: str = "application/json"
+            model: str = self.model_name
 
         raw_output = self.model_response(JudgeModule())
-        return JudgeResult(score=5, reasoning=raw_output, improvements="")
+        try:
+            import json
+            parsed = json.loads(raw_output) if isinstance(raw_output, str) else raw_output
+            return JudgeResult.model_validate(parsed)
+        except Exception:
+            logger.warning("Could not parse judge response as JudgeResult; returning raw text as reasoning.")
+            return JudgeResult(score=0, reasoning=str(raw_output), improvements="")

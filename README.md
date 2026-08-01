@@ -3,7 +3,7 @@ This project is a template.
 # LLM-Project-Template
 
 ## Overview
-This repository serves as a modular template for building applications that integrate with Large Language Models (LLMs) like Google Gemini, OpenAI, Ollama, and Perplexity. It includes robust utilities for logging, parallel execution, environment management, and document processing via MarkItDown.
+This repository serves as a modular template for building applications that integrate with Large Language Models (LLMs) like Google Gemini, OpenAI, Anthropic, Ollama, vLLM, and Perplexity. It includes robust utilities for logging, parallel execution, environment management, and document processing via MarkItDown.
 
 ---
 
@@ -48,11 +48,13 @@ Singleton utility for centralized tracking and calculation of API usage costs.
   - **Input:** `model_name` (str), `prompt_tokens` (int), `output_tokens` (int), `cached_tokens` (int, default=0).
   - **Output:** `dict` - Calculated costs for input, output, cached tokens, and the total.
   - **Process:** Matches the model name against pricing data and computes estimated costs based on token usage, including >200k token tier thresholds.
-- **`record_transaction(self, module_name: str, model_name: str, costs: dict, duration: float)`**
-  - **Input:** `module_name` (str), `model_name` (str), `costs` (dict), `duration` (float).
-  - **Process:** Appends transaction details to the global history and updates overall session metrics.
+- **`record_transaction(self, module_name: str, model_name: str, costs: dict, duration: float, input_tokens: int = 0, output_tokens: int = 0, cached_tokens: int = 0, status: str = "success")`**
+  - **Input:** `module_name` (str), `model_name` (str), `costs` (dict), `duration` (float), token counts, and optional `status`.
+  - **Process:** Appends transaction details (including token counts and status) to the global history and updates overall session metrics for successful calls.
+- **`record_failed_attempt(self, module_name: str, model_name: str, duration: float, error: Optional[Exception] = None)`**
+  - **Process:** Appends a zero-token, zero-cost row with `status="failed"` so failed primary/fallback models appear in the summary without inflating totals.
 - **`print_final_summary(self)`**
-  - **Process:** Registered via `atexit`. Prints a detailed, itemized tabular summary of all session costs and execution times upon script exit, and logs the full history as JSON.
+  - **Process:** Registered via `atexit`. Prints a detailed, itemized tabular summary of all session costs, token counts, and execution times upon script exit (labeling failed models as `model (failed)`), and logs the full history as JSON.
 
 ---
 
@@ -60,12 +62,27 @@ Singleton utility for centralized tracking and calculation of API usage costs.
 Unified entry point for dynamic model selection and routing across multiple LLM backends.
 
 #### Class: `ModelRouter`
-- **`__init__(self, module: BaseModule, api_keys: Optional[dict] = None, fallback_index: int = 0)`**
-  - **Process:** Resolves the intended model name (handling fallback arrays), identifies the necessary provider, lazily imports the respective provider's class, and initializes the `LLMProvider` instance.
+- **`__init__(self, module: BaseModule, fallback_index: int = 0)`**
+  - **Process:** Builds an order-preserving model chain from `module.model` and/or `module.models` (starting at `fallback_index`), identifies the necessary provider for the primary model, lazily imports the respective provider's class, and initializes the `LLMProvider` instance.
+- **`model_response(...)`**
+  - **Process:** Walks the model chain. On each failure, records a zero-token failed attempt via `CostTracker` and tries the next fallback (including cross-provider fallbacks). Raises if the entire chain fails.
 - **`get_provider_by_model_name(model_name: str) -> str` (static)**
-  - **Input:** `model_name` (str).
-  - **Output:** `str` - Provider name (e.g., "openai", "google", "ollama", "perplexity").
-  - **Process:** Routes requests by matching model string prefixes.
+  - **Input:** `model_name` (str) in the canonical `provider/model` form.
+  - **Output:** `str` - Provider name (e.g., "openai", "google", "anthropic", "ollama", "vllm", "perplexity").
+  - **Process:** Reads the provider straight off the prefix. A name with no recognised prefix falls back to `_infer_provider_from_bare_name`, which guesses from the model family and logs a warning.
+- **`strip_routing_prefix(model_name: str) -> str` (static)**
+  - **Process:** Removes the provider prefix so the bare model id is what reaches the SDK and the pricing table.
+
+---
+
+### File: `core/llm_models/model_names.py`
+Owns the `provider/model` naming convention, shared by the router and the cost tracker.
+
+- **`PROVIDER_ALIASES`**: Accepted prefixes mapped onto internal provider keys — `gemini`/`google` → google, `openai`, `anthropic`/`claude`, `perplexity`/`sonar`, `ollama`, `vllm`.
+- **`split_model_name(model_name) -> (provider | None, model)`**: Splits on the first slash, but only when the prefix is a known alias, so a repository-style id like `meta-llama/Llama-3.1-8B` survives intact. `vllm/meta-llama/Llama-3.1-8B` yields `("vllm", "meta-llama/Llama-3.1-8B")`.
+- **`strip_provider_prefix(model_name) -> str`**: The bare model id.
+
+**Why the prefix:** the provider is stated rather than guessed, so a model released after this code was written routes correctly with no change here and no row in `assets/model_pricing.csv`. An unpriced model is reported at `$0.00` with a warning; the call itself is unaffected.
 
 ---
 
@@ -73,10 +90,11 @@ Unified entry point for dynamic model selection and routing across multiple LLM 
 Implementation of the Google Gemini LLM provider.
 
 #### Class: `GeminiProvider` (LLMProvider)
+Credential type is selected by `GEMINI_KEY_TYPE` in `.env` (`GEMINI_KEY` or `SERVICE_ACC_JSON`). `GEMINI_KEY` talks to the Gemini Developer API. `SERVICE_ACC_JSON` talks to Vertex AI using a service-account JSON (`GEMINI_SERVICE_ACCOUNT_FILE` or `GEMINI_SERVICE_ACCOUNT_JSON`) plus `GEMINI_PROJECT` / `GEMINI_LOCATION`.
 - **`model_response(...)`**
   - **Process:** Sends prompts/files to Gemini using the `google-genai` SDK. Supports advanced parameters, reasoning budgets via `ThinkingConfig`, structured JSON output, native file caching metadata, and streaming generators.
 - **`upload_media(...)`**
-  - **Process:** Uploads bytes natively to Gemini's File API, utilizing a polling loop to verify the file is active before proceeding.
+  - **Process:** Under `GEMINI_KEY`, uploads bytes to Gemini's File API and polls until active. Under `SERVICE_ACC_JSON`, Vertex rejects that Files API, so the bytes are inlined as a `types.Part` instead.
 - **`embed_content(...)`**
   - **Process:** Generates embeddings utilizing `gemini-embedding-001`.
 
@@ -95,12 +113,40 @@ Implementation of the OpenAI LLM provider.
 
 ---
 
+### File: `core/llm_models/providers/anthropic.py`
+Implementation of the Anthropic (Claude) LLM provider.
+
+#### Class: `AnthropicProvider` (LLMProvider)
+- **`model_response(...)`**
+  - **Process:** Calls the Messages API. Supplies the mandatory `max_tokens` (defaulting to 4096), passes the system prompt as a top-level `system` argument rather than a message, and converts the OpenAI-shaped media payloads from `media_utils` into Anthropic image blocks. Structured output is enforced by forcing a single tool call built from the Pydantic schema, since Anthropic has no JSON response format. A string `reasoning_budget` maps onto the `effort` scale, while an integer budget enables extended thinking with `temperature=1`.
+- **`upload_media(...)`**
+  - **Process:** Extracts PDF text locally, base64-encodes images, and slices video into frames, matching the OpenAI provider.
+- **`embed_content(...)`**
+  - **Process:** Not implemented; Anthropic exposes no embeddings API.
+
+---
+
 ### File: `core/llm_models/providers/ollama.py`
 Implementation of the local Ollama LLM provider.
 
 #### Class: `OllamaProvider` (LLMProvider)
 - **`model_response(...)`**
   - **Process:** Communicates with local open-source models using the Ollama SDK, gracefully injecting system prompts, maintaining structured formats via JSON parsing, and handling base64 visual files.
+
+---
+
+### File: `core/llm_models/providers/vllm.py`
+Client for a self-hosted vLLM OpenAI-compatible server.
+
+#### Class: `VLLMProvider` (LLMProvider)
+- **`model_response(...)`**
+  - **Process:** Points the OpenAI SDK at the vLLM server resolved from `VLLM_URL` (default `http://localhost:8000/v1`). Constrains structured output through the standard `response_format` with a `json_schema` derived from the Pydantic model, and passes vLLM-only sampling knobs (`top_k`, `repetition_penalty`) via `extra_body`. Supports streaming with usage accounting.
+- **`upload_media(...)`**
+  - **Process:** Extracts PDF text locally, base64-encodes images for vision models, and slices video into frames.
+- **`embed_content(...)`**
+  - **Process:** Calls `/v1/embeddings`, which requires the server to be running an embedding model.
+
+Note: this is a client only. The `vllm` package is never imported, so no GPU runtime is needed to use it. Because vLLM serves arbitrary model names, routing requires the explicit `vllm/` prefix (for example `vllm/meta-llama/Llama-3.1-8B-Instruct`). Self-hosted models have no per-token price, so transactions are recorded at $0.00.
 
 ---
 
@@ -128,7 +174,7 @@ Defines the standard configuration schema for application modules using Pydantic
 
 #### Class: `Base` (BaseModel)
 - **Core Parameters:** `prompt`, `system_prompt`, `structure`.
-- **Model Parameters:** `model` (default `"gemini-2.5-pro"`), `fallback_models`.
+- **Model Parameters:** `model` (optional `str`, no default model value), `models` (`list[str]`, default list of Gemini models). Consumed by `ModelRouter` to determine primary and ordered fallback models.
 - **Generation:** `temperature`, `top_p`, `top_k`, `max_tokens`, `reasoning_budget`.
 - **Sampling:** `presence_penalty`, `frequency_penalty`, `seed`, `stop_sequences`.
 - **Provider Features:** `response_mime_type`, `stream`, `logprobs`, `service_tier`, `tools`, `candidate_count`.
@@ -141,19 +187,30 @@ General utility functions for environment management, file handling, multi-threa
 
 ### File: `utils/env_ops.py`
 Handles secret management and environment variables natively or via AWS.
+- **`get_secret(key_name: str)`**: The entry point providers should use. Routes to `.env` or AWS Secrets Manager based on `KEY_LOCATION`.
+- **`get_key_location()`**: Reads `KEY_LOCATION` (`LOCAL` | `AWS_SM`), defaulting to `LOCAL`.
 - **`get_local_secret(key_name: str)`**: Reads directly from `.env`.
+- **`get_aws_secret(key_name: str, secret_name: str)`**: Reads a single key out of an AWS Secrets Manager bundle.
+- **`get_database_url()`**: Convenience wrapper resolving `DATABASE_URL` through `KEY_LOCATION`.
+- **`get_gemini_key_type()`**: Reads `GEMINI_KEY_TYPE` (`GEMINI_KEY` | `SERVICE_ACC_JSON`), defaulting to `GEMINI_KEY`.
+- **`load_gemini_service_account_credentials()`**: Builds Vertex credentials from `GEMINI_SERVICE_ACCOUNT_FILE` or inline `GEMINI_SERVICE_ACCOUNT_JSON`.
+- **`resolve_gemini_project()` / `resolve_gemini_location()`**: Resolve the Vertex project and region with fallbacks to the standard `GOOGLE_CLOUD_*` variables.
 - **`get_secret_dict(secret_name: str)`**: Fetches a bulk dictionary of configuration from AWS Secrets Manager utilizing memory caching via `boto3`.
 - **`get_keys_dict()`**: Orchestrates global keys seamlessly.
+
+**Config vs secrets:** `KEY_LOCATION` only moves credentials (`DATABASE_URL`, provider keys, provider URLs). Mode switches, project ids and regions are deployment config and are always read from `.env`, since `SECRET_NAME` itself must be readable before Secrets Manager can be reached.
 
 ### File: `utils/file_ops.py`
 Standardized file operations.
 - **`read_file(file_path: str)`**: Reads `utf-8` text.
 - **`get_file(file_path: str)`**: Grabs raw binary data.
-- **`read_prompt(prompt_tite: str)`**: Short-hand fetch for `.txt` files within `core/prompts`.
+- **`read_prompt(prompt_title: str)`**: Short-hand fetch for `.txt` files within `core/prompts`.
 - **`read_csv(file_path: str)`**: Reads CSV rows utilizing the standard dictionary reader.
 
 ### File: `utils/logger.py`
-- **`get_logger(name: str, level: int = logging.INFO)`**: Builds a dual-channel logger passing standard strings to the CLI, and capturing the robust JSON log structure internally to the `/logs` directory based on the active date timestamp.
+- **`get_logger(name: str, level: Optional[int] = None)`**: Returns a logger honouring `LOGGING_MODE` and `LOGGING_LEVEL`. Under `NORMAL` it builds a dual-channel `logging.Logger` passing standard strings to the CLI and capturing the JSON log structure into `/logs` by date. Under `LAMBDA` it returns a `LambdaLogger` that prints one JSON record per line to stdout, since Lambda has a read-only filesystem and CloudWatch already captures stdout. An explicit `level` argument overrides `LOGGING_LEVEL`.
+- **`get_logging_mode()` / `get_logging_level()`**: Parse and validate the two variables, accepting either level names (`DEBUG`, `INFO`, ...) or numeric levels.
+- **`LambdaLogger`**: Print-based stand-in mirroring the `Logger` methods used across the project (`debug`/`info`/`warning`/`error`/`critical`/`exception`/`log`), including `%`-style lazy interpolation and traceback capture.
 
 ### File: `utils/markitdown_utils.py`
 Integrates Microsoft's MarkItDown.

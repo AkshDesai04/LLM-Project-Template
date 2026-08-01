@@ -6,9 +6,16 @@ from pydantic import BaseModel
 from openai import OpenAI
 
 from utils.logger import get_logger
-from utils.env_ops import get_local_secret
+from utils.env_ops import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
+from ..reasoning import (
+    ThinkTagStreamSplitter,
+    build_result,
+    join_reasoning,
+    resolve_return_reasoning,
+    split_think_tags,
+)
 from ..utils.media_utils import (
     extract_text_from_pdf_bytes,
     process_video_frames,
@@ -18,17 +25,27 @@ from core.modules.base import Base as BaseModule
 
 logger = get_logger("OpenAIProvider")
 
+# Top-level Constants
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_RETRY_SLEEP_SECONDS: float = 2.0
+REASONING_MODEL_PATTERNS: tuple = ("o1", "o3", "o4", "gpt-5")
+RESPONSES_ONLY_PATTERNS: tuple = ("gpt-5.5-pro", "gpt-5-pro")
+CHAT_COMPLETION_ERROR_PATTERNS: tuple = (
+    "not a chat model",
+    "not supported in the v1/chat/completions endpoint",
+)
+
 
 class OpenAIProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
-        api_key = api_key or get_local_secret("OPEN_AI_KEY")
+        api_key = api_key or get_secret("OPEN_AI_KEY")
         super().__init__(api_key, base)
         self.client = OpenAI(api_key=api_key)
 
     @staticmethod
     def _is_reasoning_model(model: str) -> bool:
         model = model.lower()
-        return any(x in model for x in ["o1", "o3", "o4", "gpt-5"])
+        return any(x in model for x in REASONING_MODEL_PATTERNS)
 
     @staticmethod
     def _requires_responses_api(model: str) -> bool:
@@ -36,22 +53,12 @@ class OpenAIProvider(LLMProvider):
         Models that should use the Responses API instead of Chat Completions.
         """
         model = model.lower()
-
-        responses_only_patterns = [
-            "gpt-5.5-pro",
-            "gpt-5-pro",
-        ]
-
-        return any(p in model for p in responses_only_patterns)
+        return any(p in model for p in RESPONSES_ONLY_PATTERNS)
 
     @staticmethod
     def _is_chat_completion_endpoint_error(error: Exception) -> bool:
         error_str = str(error).lower()
-
-        return (
-            "not a chat model" in error_str
-            or "not supported in the v1/chat/completions endpoint" in error_str
-        )
+        return any(p in error_str for p in CHAT_COMPLETION_ERROR_PATTERNS)
 
     def _build_responses_input(self, messages: List[dict]) -> List[dict]:
         """
@@ -102,6 +109,32 @@ class OpenAIProvider(LLMProvider):
 
         return response_input
 
+    @staticmethod
+    def _extract_message_reasoning(message: Any) -> Optional[str]:
+        """
+        OpenAI's own Chat Completions models keep reasoning hidden, but
+        OpenAI-compatible gateways commonly expose it as reasoning_content.
+        """
+        value = getattr(message, 'reasoning_content', None)
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    @staticmethod
+    def _extract_responses_reasoning(response: Any) -> Optional[str]:
+        """
+        The Responses API returns reasoning as its own output items, each
+        carrying a list of summary parts. The raw chain of thought is never
+        exposed; only these summaries are.
+        """
+        summaries = []
+
+        for item in getattr(response, 'output', None) or []:
+            if getattr(item, 'type', '') != 'reasoning':
+                continue
+            for part in getattr(item, 'summary', None) or []:
+                summaries.append(getattr(part, 'text', '') or "")
+
+        return join_reasoning(summaries)
+
     def _responses_api_generate(
         self,
         model: str,
@@ -109,9 +142,12 @@ class OpenAIProvider(LLMProvider):
         reasoning_effort: Optional[str] = None,
         max_tokens: Optional[int] = None,
         structure: Optional[Any] = None,
+        return_reasoning: bool = False,
     ):
         """
         Generation using the OpenAI Responses API.
+
+        Returns (response, output_content, reasoning).
         """
 
         response_input = self._build_responses_input(messages)
@@ -121,20 +157,33 @@ class OpenAIProvider(LLMProvider):
             "input": response_input,
         }
 
+        reasoning_kwargs = {}
         if reasoning_effort and isinstance(reasoning_effort, str):
-            response_kwargs["reasoning"] = {
-                "effort": reasoning_effort.lower()
-            }
+            reasoning_kwargs["effort"] = reasoning_effort.lower()
+        if return_reasoning:
+            # Summaries are omitted unless they are requested.
+            reasoning_kwargs["summary"] = "auto"
+        if reasoning_kwargs:
+            response_kwargs["reasoning"] = reasoning_kwargs
 
         if max_tokens is not None:
             response_kwargs["max_output_tokens"] = max_tokens
 
         if structure:
-            response_kwargs["text"] = {
-                "format": {
-                    "type": "json_object"
+            if inspect.isclass(structure) and issubclass(structure, BaseModel):
+                response_kwargs["text"] = {
+                    "format": {
+                        "type": "json_schema",
+                        "name": structure.__name__,
+                        "schema": structure.model_json_schema(),
+                    }
                 }
-            }
+            else:
+                response_kwargs["text"] = {
+                    "format": {
+                        "type": "json_object"
+                    }
+                }
 
         response = self.client.responses.create(**response_kwargs)
 
@@ -146,7 +195,7 @@ class OpenAIProvider(LLMProvider):
             except Exception:
                 output_content = None
 
-        return response, output_content
+        return response, output_content, self._extract_responses_reasoning(response)
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
         prompt = getattr(module, 'prompt', "")
@@ -184,6 +233,7 @@ class OpenAIProvider(LLMProvider):
         top_logprobs = kwargs.get('top_logprobs', getattr(module, 'top_logprobs', self.top_logprobs))
         service_tier = kwargs.get('service_tier', getattr(module, 'service_tier', self.service_tier))
         stream = kwargs.get('stream', getattr(module, 'stream', self.stream))
+        return_reasoning = resolve_return_reasoning(module, kwargs, self.return_reasoning)
 
         modalities = kwargs.get('modalities')
         audio = kwargs.get('audio')
@@ -246,7 +296,7 @@ class OpenAIProvider(LLMProvider):
             })
 
         last_exception = None
-        max_retries = kwargs.get('max_retries', 3)
+        max_retries = kwargs.get('max_retries', DEFAULT_MAX_RETRIES)
 
         logger.info(f"Attempting generation with model: {model}")
 
@@ -257,8 +307,15 @@ class OpenAIProvider(LLMProvider):
                 start_time = time.time()
 
                 parsed_object = None
+                reasoning = None
 
-                use_responses_api = self._requires_responses_api(model)
+                configured_api_type = cost_tracker.get_model_api_type(model)
+                if configured_api_type == "responses":
+                    use_responses_api = True
+                elif configured_api_type == "chat_completions":
+                    use_responses_api = False
+                else:
+                    use_responses_api = self._requires_responses_api(model)
 
                 # ============================================================
                 # RESPONSES API FLOW
@@ -267,12 +324,13 @@ class OpenAIProvider(LLMProvider):
                 if use_responses_api:
                     logger.info(f"Using Responses API for model: {model}")
 
-                    response, output_content = self._responses_api_generate(
+                    response, output_content, reasoning = self._responses_api_generate(
                         model=model,
                         messages=messages,
                         reasoning_effort=reasoning_effort,
                         max_tokens=max_tokens,
-                        structure=structure
+                        structure=structure,
+                        return_reasoning=return_reasoning
                     )
 
                 # ============================================================
@@ -342,6 +400,7 @@ class OpenAIProvider(LLMProvider):
                                 "include_usage": True
                             }
 
+                    # TODO: Refactor parameter scrubbing for reasoning models (o1/o3/o4/gpt-5) into declarative model spec metadata.
                     is_reasoning_model = self._is_reasoning_model(model)
 
                     if is_reasoning_model:
@@ -369,6 +428,9 @@ class OpenAIProvider(LLMProvider):
 
                             parsed_object = response.choices[0].message.parsed
                             output_content = response.choices[0].message.content
+                            reasoning = self._extract_message_reasoning(
+                                response.choices[0].message
+                            )
 
                         else:
                             if structure:
@@ -382,58 +444,77 @@ class OpenAIProvider(LLMProvider):
 
                             if stream:
                                 def stream_wrapper():
-                                    for chunk in response:
-                                        if getattr(chunk, 'usage', None):
-                                            u = chunk.usage
+                                    splitter = ThinkTagStreamSplitter()
+                                    last_prompt_tokens = 0
+                                    last_completion_tokens = 0
+                                    last_cached_tokens = 0
+                                    cost_recorded = False
 
-                                            prompt_tokens = getattr(
-                                                u,
-                                                'prompt_tokens',
-                                                0
+                                    try:
+                                        for chunk in response:
+                                            if getattr(chunk, 'usage', None):
+                                                u = chunk.usage
+                                                last_prompt_tokens = getattr(u, 'prompt_tokens', 0)
+                                                last_completion_tokens = getattr(u, 'completion_tokens', 0)
+                                                last_cached_tokens = getattr(
+                                                    getattr(u, 'prompt_tokens_details', None),
+                                                    'cached_tokens',
+                                                    0
+                                                )
+
+                                            if not return_reasoning:
+                                                yield chunk
+                                                continue
+
+                                            delta = getattr(
+                                                (chunk.choices or [None])[0], 'delta', None
+                                            ) if getattr(chunk, 'choices', None) else None
+
+                                            text, thought = splitter.feed(
+                                                getattr(delta, 'content', None)
                                             )
+                                            thought = join_reasoning([
+                                                getattr(delta, 'reasoning_content', None),
+                                                thought,
+                                            ]) or ""
 
-                                            completion_tokens = getattr(
-                                                u,
-                                                'completion_tokens',
-                                                0
-                                            )
+                                            if text or thought:
+                                                yield [text, thought]
 
-                                            cached_tokens = getattr(
-                                                getattr(
-                                                    u,
-                                                    'prompt_tokens_details',
-                                                    None
-                                                ),
-                                                'cached_tokens',
-                                                0
-                                            )
-
+                                        if return_reasoning:
+                                            text, thought = splitter.flush()
+                                            if text or thought:
+                                                yield [text, thought]
+                                    finally:
+                                        if not cost_recorded:
                                             total_duration = time.time() - start_time
-
                                             costs = cost_tracker.calculate_cost(
                                                 model,
-                                                prompt_tokens,
-                                                completion_tokens,
-                                                cached_tokens
+                                                last_prompt_tokens,
+                                                last_completion_tokens,
+                                                last_cached_tokens
                                             )
-
                                             cost_tracker.record_transaction(
                                                 type(module).__name__,
                                                 model,
                                                 costs,
-                                                total_duration
+                                                total_duration,
+                                                input_tokens=last_prompt_tokens,
+                                                output_tokens=last_completion_tokens,
+                                                cached_tokens=last_cached_tokens,
                                             )
-
+                                            cost_recorded = True
                                             logger.info(
                                                 f"OpenAI Stream Transaction Recorded: "
                                                 f"${costs['total_cost']:.6f} total cost"
                                             )
 
-                                        yield chunk
-
                                 return stream_wrapper()
 
                             output_content = response.choices[0].message.content
+                            reasoning = self._extract_message_reasoning(
+                                response.choices[0].message
+                            )
 
                     except Exception as e:
                         if self._is_chat_completion_endpoint_error(e):
@@ -442,12 +523,13 @@ class OpenAIProvider(LLMProvider):
                                 f"Retrying with Responses API..."
                             )
 
-                            response, output_content = self._responses_api_generate(
+                            response, output_content, reasoning = self._responses_api_generate(
                                 model=model,
                                 messages=messages,
                                 reasoning_effort=reasoning_effort,
                                 max_tokens=max_tokens,
-                                structure=structure
+                                structure=structure,
+                                return_reasoning=return_reasoning
                             )
 
                         else:
@@ -491,7 +573,10 @@ class OpenAIProvider(LLMProvider):
                         type(module).__name__,
                         model,
                         costs,
-                        total_duration
+                        total_duration,
+                        input_tokens=prompt_tokens,
+                        output_tokens=completion_tokens,
+                        cached_tokens=cached_tokens,
                     )
 
                     logger.info(
@@ -499,7 +584,16 @@ class OpenAIProvider(LLMProvider):
                         f"${costs['total_cost']:.6f} total cost"
                     )
 
-                return parsed_object if parsed_object else output_content
+                if parsed_object:
+                    return build_result(parsed_object, reasoning, return_reasoning)
+
+                output_content, inline_reasoning = split_think_tags(output_content)
+
+                return build_result(
+                    output_content,
+                    join_reasoning([reasoning, inline_reasoning]),
+                    return_reasoning,
+                )
 
             except Exception as e:
                 last_exception = e
@@ -509,7 +603,7 @@ class OpenAIProvider(LLMProvider):
                     f"{attempt + 1} for model {model}: {e}"
                 )
 
-                time.sleep(2)
+                time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                 continue
 
         raise RuntimeError(
@@ -545,11 +639,12 @@ class OpenAIProvider(LLMProvider):
     def embed_content(
         self,
         text: Union[str, List[str]],
-        model="text-embedding-3-small",
+        model: Optional[str] = None,
         **kwargs
     ) -> Union[List[float], List[List[float]]]:
 
         try:
+            model = model or self.model_name
             input_data = [text] if isinstance(text, str) else text
 
             start_time = time.time()
@@ -578,7 +673,10 @@ class OpenAIProvider(LLMProvider):
                     "Embedding",
                     model,
                     costs,
-                    total_duration
+                    total_duration,
+                    input_tokens=prompt_tokens,
+                    output_tokens=0,
+                    cached_tokens=0,
                 )
 
             if isinstance(text, str):
@@ -615,6 +713,6 @@ class OpenAIProvider(LLMProvider):
         class JudgeModule(BaseModule):
             prompt: str = judge_prompt
             structure: Any = JudgeResult
-            model: str = "gpt-4o-mini"
+            model: str = self.model_name
 
         return self.model_response(JudgeModule())

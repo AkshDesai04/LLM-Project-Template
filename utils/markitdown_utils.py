@@ -1,22 +1,21 @@
 import os
-from typing import Optional, Any, Union, List, Iterator
+from typing import Optional, Any
 from markitdown import MarkItDown
 from utils.logger import get_logger
 from urllib.parse import urlparse
 
-try:
-    from langchain_core.document_loaders import BaseLoader
-    from langchain_core.documents import Document
-except ImportError:
-    class BaseLoader: pass
-    class Document: pass
-
 logger = get_logger("MarkItDownUtils")
 
-class MarkItDownUtils(BaseLoader):
+# Top-level Constants
+DEFAULT_ENABLE_PLUGINS: bool = True
+ALLOWED_URL_SCHEMES: tuple = ("http", "https")
+BLOCKED_HOSTNAMES: set = {"localhost", "0.0.0.0", "[::]"}
+
+
+class MarkItDownUtils:
     """
     A comprehensive utility class for converting various file formats and data sources
-    into Markdown using Microsoft's MarkItDown. Inherits from LangChain's BaseLoader.
+    into Markdown using Microsoft's MarkItDown.
     """
 
     def __init__(
@@ -24,8 +23,7 @@ class MarkItDownUtils(BaseLoader):
         llm_client: Optional[Any] = None, 
         llm_model: Optional[str] = None,
         docintel_endpoint: Optional[str] = None,
-        enable_plugins: bool = True,
-        file_path: Optional[str] = None
+        enable_plugins: bool = DEFAULT_ENABLE_PLUGINS
     ):
         """
         Initializes the MarkItDown converter.
@@ -37,26 +35,6 @@ class MarkItDownUtils(BaseLoader):
             docintel_endpoint=docintel_endpoint,
             enable_plugins=enable_plugins
         )
-        self.file_path = file_path
-
-    def lazy_load(self) -> Iterator[Document]:
-        """
-        Implements LangChain's lazy_load method.
-        """
-        if not self.file_path:
-            raise ValueError("file_path must be provided to use lazy_load()")
-        
-        content = self.convert(self.file_path)
-        yield Document(
-            page_content=content,
-            metadata={"source": self.file_path}
-        )
-
-    def load(self) -> List[Document]:
-        """
-        Implements LangChain's load method.
-        """
-        return list(self.lazy_load())
 
     def convert(self, source: str) -> str:
         """
@@ -109,12 +87,25 @@ class MarkItDownUtils(BaseLoader):
         """
         try:
             parsed_url = urlparse(url)
-            # Block internal, private, or loopback IPs/hostnames
-            if parsed_url.hostname in ['localhost', '127.0.0.1', '169.254.169.254'] or parsed_url.hostname.startswith(
-                    '10.'):
-                raise ValueError("Invalid or restricted URL provided.")
-            if parsed_url.scheme not in ['http', 'https']:
-                raise ValueError("Only HTTP/HTTPS protocols are allowed.")
+            if parsed_url.scheme not in ALLOWED_URL_SCHEMES:
+                raise ValueError(f"Only HTTP/HTTPS protocols are allowed. Got '{parsed_url.scheme}'.")
+
+            # Block internal, private, loopback, and reserved IPs/hostnames
+            hostname = parsed_url.hostname
+            if not hostname:
+                raise ValueError("Invalid URL: no hostname found.")
+
+            if hostname in BLOCKED_HOSTNAMES:
+                raise ValueError(f"Invalid or restricted URL hostname: '{hostname}'.")
+
+            import ipaddress
+            try:
+                ip = ipaddress.ip_address(hostname)
+                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                    raise ValueError(f"Invalid or restricted IP address provided: '{hostname}'.")
+            except ValueError:
+                # hostname is a DNS name, not a raw IP
+                pass
 
             logger.info(f"Converting URL: {url}")
             result = self.md.convert_url(url)

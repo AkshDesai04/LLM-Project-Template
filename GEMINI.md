@@ -1,10 +1,11 @@
 # Project Overview
 
-This repository is a modular, scalable Python template designed for building robust applications that integrate with Large Language Models (LLMs) such as Google Gemini, OpenAI, Ollama, and Perplexity. It abstracts away provider-specific implementations, offering unified interfaces for prompt configuration, model routing, media uploading (PDF, Video, Images), cost calculation, parallel execution, and complex file conversions.
+This repository is a modular, scalable Python template designed for building robust applications that integrate with Large Language Models (LLMs) such as Google Gemini, OpenAI, Anthropic, Ollama, vLLM, and Perplexity. It abstracts away provider-specific implementations, offering unified interfaces for prompt configuration, model routing, media uploading (PDF, Video, Images), cost calculation, parallel execution, and complex file conversions.
 
 ### `assets/model_pricing.csv`
 This file is the central source of truth for all supported models within the framework. It acts as a local database containing crucial metadata for dozens of models across different providers.
-*   **Structure:** It maps `model_id` (e.g., `gpt-4o`, `gemini-2.5-pro`) and details exact costs per million tokens for input, output, cached context, and tiered high-context pricing (e.g., input > 200k).
+*   **Structure:** It maps `model_id` (e.g., `gpt-4o`, `gemini-2.5-pro`) and details exact costs per million tokens for input, output, cached context, and tiered high-context pricing (e.g., input > 200k). Rows are keyed by the **bare** model id, without the `provider/` prefix used in module configs.
+*   **Not required for routing:** A model absent from this file still runs; it is simply reported at `$0.00` with a warning. Add a row when you want its cost tracked.
 *   **Dependency in `core/llm_models/cost_tracker.py`:** The singleton tracking class uses this CSV to dynamically resolve transaction costs in real-time, assigning exact financial metrics on each executed LLM completion.
 
 ---
@@ -19,8 +20,8 @@ Defines the `Base` class, which extends Pydantic's `BaseModel`. This is the stan
     *   `prompt` (str): The specific text instruction for the LLM.
     *   `system_prompt` (str): Broad system guidelines injected dynamically.
     *   `structure` (Any): Optional Pydantic model enforcing a structured JSON output.
-    *   `model` (str): The primary model identifier (e.g., `"gemini-2.5-pro"`).
-    *   `fallback_models` (list[str]): Alternative models to systematically attempt if the primary fails.
+    *   `model` (str | None): Optional primary model identifier in the canonical `provider/model` form (e.g., `"gemini/gemini-2.5-pro"`). Has no default value in `base.py`.
+    *   `models` (list[str]): List of model identifiers in canonical `provider/model` form. Defaults to `["gemini/gemini-2.5-pro", "gemini/gemini-2.5-flash", "gemini/gemini-2.5-flash-lite"]`. If both `model` and `models` exist, `model` is primary and `models` contains ordered fallbacks; if only `models` is specified, the first entry is primary and the remainder are ordered fallbacks.
     *   `temperature`, `top_p`, `top_k`, `max_tokens`: Standard LLM generation parameters.
     *   `reasoning_budget` (int | str): Controls deep thinking parameters native to advanced reasoning models (`o1`, `o3`, `gpt-5`, Gemini Thinking modes).
     *   `stream` (bool): Configures the model to dispatch chunked iterative generators instead of static single completions.
@@ -41,21 +42,24 @@ Contains the abstract base class `LLMProvider` that all provider-specific implem
 
 ### `core/llm_models/cost_tracker.py`
 Singleton class defining the `CostTracker`. Calculates and stores multi-call metrics seamlessly.
-*   *Flow:* Upon completion generation, models transmit usage tokens to the `calculate_cost` logic mapping tier thresholds natively. Subsequent valid queries map to the global dictionary via `record_transaction`.
-*   **`print_final_summary()`:** Hooks to the `atexit` garbage collector natively executing and logging deep tabular CLI metric layouts detailing every processed transaction upon code termination. Captures overarching application performance cleanly to JSON telemetry files dynamically.
+*   *Flow:* Upon completion generation, models transmit usage tokens to the `calculate_cost` logic mapping tier thresholds natively. Subsequent valid queries map to the global dictionary via `record_transaction` (including token counts). Failed primary/fallback attempts are recorded via `record_failed_attempt` as zero-token, zero-cost rows with `status="failed"`.
+*   **`print_final_summary()`:** Hooks to the `atexit` garbage collector natively executing and logging deep tabular CLI metric layouts detailing every processed transaction (tokens + costs, with failed models labeled `model (failed)`) upon code termination. Captures overarching application performance cleanly to JSON telemetry files dynamically.
 
 ### `core/llm_models/router.py`
 The unified factory entry point (`ModelRouter`). It abstracts the provider selection process. **IMPORTANT: When calling an LLM, you must default to using `ModelRouter`. Direct instantiation of provider-specific files should be avoided.**
 *   **Key Functions & Flow:**
-    *   **`get_provider_by_model_name()`:** Scans model name prefixes dynamically categorizing routing constraints (`ollama/`, `gemini`, `gpt`, `sonar`) targeting local instances, Google, OpenAI, or Perplexity natively.
-    *   **Initialization & Lazy Loading:** Only initializes the specific requisite module avoiding bloat and missing API key errors. Retrieves keys contextually through local `.env` definitions mapping them into the abstracted `LLMProvider`.
+    *   **`get_provider_by_model_name()`:** Reads the provider directly off the canonical `provider/model` prefix (`gemini/`, `openai/`, `anthropic/`, `perplexity/`, `ollama/`, `vllm/`). Because the provider is declared rather than inferred, a model released after this code was written routes correctly with no change to the router and no row in `assets/model_pricing.csv`. Unprefixed names still resolve through a legacy family guess that logs a warning.
+    *   **Initialization & Lazy Loading:** Builds the model chain from `module.model` and/or `module.models`. Only initializes the specific requisite module avoiding bloat and missing API key errors. Retrieves keys contextually through local `.env` definitions mapping them into the abstracted `LLMProvider`.
+    *   **Fallback Chain:** `model_response` walks the chain across providers. Each failed model is recorded as a zero-token `(failed)` row before the next fallback is attempted.
     *   **Proxy Methods:** Exposes core tasks cleanly bridging execution transparently without altering API interactions.
 
 ### `core/llm_models/providers/`
 This folder maps the abstracted provider classes integrating directly with backend Python SDK architectures natively.
-*   **`gemini.py` (`GeminiProvider`)**: Operates the `google-genai` SDK executing standard loops, managing `ThinkingConfig` generation loops, routing structured files natively into the active File API utilizing robust HTTP polling loops preventing generation overlap on unready internal metrics.
+*   **`gemini.py` (`GeminiProvider`)**: Operates the `google-genai` SDK executing standard loops, managing `ThinkingConfig` generation loops, and routing media either through the Developer File API (`GEMINI_KEY_TYPE=GEMINI_KEY`) or as inlined `Part`s under Vertex AI (`GEMINI_KEY_TYPE=SERVICE_ACC_JSON`). The credential type, the service-account JSON, and the Vertex project/location are all read from `.env`.
 *   **`openai.py` (`OpenAIProvider`)**: Implements strict `beta.chat.completions.parse` routines natively handling extensive visual data parsing via `media_utils` logic avoiding missing native media API boundaries. Triggers the specialized `responses` API robustly handling unaccepted chat logic configurations automatically seamlessly retrying context errors securely.
+*   **`anthropic.py` (`AnthropicProvider`)**: Drives the Claude Messages API, supplying the mandatory `max_tokens` cap, hoisting the system prompt to its own top-level argument and translating shared media payloads into native image blocks. Structured output is forced through a single schema-derived tool call because Anthropic exposes no JSON response format; embeddings are unsupported by design.
 *   **`ollama.py` (`OllamaProvider`)**: Seamlessly connects to dynamic `localhost` Ollama deployments mapping images dynamically avoiding cloud storage, securely capturing locally run metrics gracefully mapping structural returns safely.
+*   **`vllm.py` (`VLLMProvider`)**: Client for a self-hosted vLLM OpenAI-compatible server resolved from `VLLM_URL`, defaulting to `http://localhost:8000/v1`. Constrains schemas through the standard `response_format` json_schema field rather than the `guided_json` extra removed in vLLM v0.12.0, and forwards vLLM-only sampling knobs through `extra_body`. The heavyweight `vllm` package is never imported, so no GPU runtime is required; models must carry the explicit `vllm/` prefix since the server exposes arbitrary names.
 *   **`perplexity.py` (`PerplexityProvider`)**: Hooks across OpenAI base class structures mapping web index references dynamically defining native citations formatting without additional client SDK integrations.
 
 ### `core/llm_models/utils/media_utils.py`
@@ -71,14 +75,18 @@ Helper scripts for infrastructure, conversion, and system-level operations.
 
 ### `utils/env_ops.py`
 A hybrid local/cloud secrets manager mapping local overrides contextually scaling complex cloud infrastructures robustly via `boto3`.
+*   **`KEY_LOCATION` switch:** `get_secret()` is the single entry point providers call for credentials. `LOCAL` resolves through `get_local_secret` (`.env`); `AWS_SM` resolves through `get_aws_secret` against the bundle named by `SECRET_NAME`. This covers `DATABASE_URL`, the provider keys, and the provider URLs. Mode switches, project ids and regions stay in `.env` regardless, because `SECRET_NAME` must be readable before Secrets Manager can be reached.
 *   **Key Functions:** Integrates `get_aws_secret` utilizing dynamic `SECRET_NAME` references mapping deep structural API key dicts gracefully resolving memory locks caching local execution metrics resolving latency.
 
 ### `utils/file_ops.py`
 Standardized IO operations ensuring utf-8 encodings and proper error handling. Includes text/binary data ingestion mapping local text layouts securely natively mapping `.csv` metrics contextually.
 
 ### `utils/logger.py`
-Provides a robust, dual-output logging system.
-*   **Key Features:** Outputs standard readable logs to the terminal (`sys.stdout`) natively yielding structured, contextually mapped **JSON** architectures yielding native telemetry parsing routines straight to `logs/` timestamping seamlessly.
+Provides a robust, dual-output logging system driven by `LOGGING_MODE` and `LOGGING_LEVEL`.
+*   **`LOGGING_MODE=NORMAL`:** Outputs standard readable logs to the terminal (`sys.stdout`) natively yielding structured, contextually mapped **JSON** architectures yielding native telemetry parsing routines straight to `logs/` timestamping seamlessly.
+*   **`LOGGING_MODE=LAMBDA`:** Swaps the logging package for plain `print`, emitting one JSON record per line to stdout. No file handler is created, since Lambda's filesystem is read-only and CloudWatch already ingests stdout. `get_logger` returns a `LambdaLogger` exposing the same method surface, so call sites are unchanged.
+*   **`LOGGING_LEVEL`:** Accepts level names or numeric values and applies to both modes. An explicit `level` argument to `get_logger` still wins.
+*   **Note:** This module reads the environment directly rather than through `env_ops`, because `env_ops` imports it.
 
 ### `utils/markitdown_utils.py`
 A comprehensive Microsoft `MarkItDown` integration mapping heavy multi-modal documents securely via a centralized class pipeline resolving disparate inputs securely.

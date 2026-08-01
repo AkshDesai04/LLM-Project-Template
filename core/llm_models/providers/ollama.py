@@ -7,13 +7,28 @@ import ollama
 from ollama import Client
 
 from utils.logger import get_logger
-from utils.env_ops import get_local_secret
+from utils.env_ops import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
+from ..reasoning import (
+    ThinkTagStreamSplitter,
+    build_result,
+    join_reasoning,
+    resolve_return_reasoning,
+    split_think_tags,
+)
 from ..utils.media_utils import extract_text_from_pdf_bytes, process_video_frames
 from core.modules.base import Base as BaseModule
 
 logger = get_logger("OllamaProvider")
+
+# Top-level Constants
+DEFAULT_OLLAMA_URL: str = "http://localhost:11434"
+DEFAULT_OLLAMA_KEY: str = "local-key"
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_RETRY_SLEEP_SECONDS: float = 2.0
+DEFAULT_FORMAT_JSON: str = "json"
+
 
 class OllamaProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
@@ -21,9 +36,9 @@ class OllamaProvider(LLMProvider):
         api_key is not strictly required for Ollama but kept for interface consistency.
         OLLAMA_URL and OLLAMA_KEY should be set in .env if needed.
         """
-        api_key = api_key or get_local_secret("OLLAMA_KEY", raise_error=False) or "local-key"
+        api_key = api_key or get_secret("OLLAMA_KEY", raise_error=False) or DEFAULT_OLLAMA_KEY
         super().__init__(api_key, base)
-        ollama_url = get_local_secret("OLLAMA_URL", raise_error=False) or "http://localhost:11434"
+        ollama_url = get_secret("OLLAMA_URL", raise_error=False) or DEFAULT_OLLAMA_URL
         logger.info(f"Initializing Ollama client with host: {ollama_url}")
         self.client = Client(host=ollama_url)
 
@@ -41,6 +56,7 @@ class OllamaProvider(LLMProvider):
         stop = kwargs.get('stop') or kwargs.get('stop_sequences') or getattr(module, 'stop_sequences', self.stop_sequences)
         seed = kwargs.get('seed', getattr(module, 'seed', self.seed))
         stream = kwargs.get('stream', getattr(module, 'stream', self.stream))
+        return_reasoning = resolve_return_reasoning(module, kwargs, self.return_reasoning)
         
         # Ollama specific options
         options = {
@@ -87,13 +103,13 @@ class OllamaProvider(LLMProvider):
         messages.append(user_msg)
 
         last_exception = None
-        max_retries = kwargs.get('max_retries', 3)
+        max_retries = kwargs.get('max_retries', DEFAULT_MAX_RETRIES)
         pull_attempted = False
         
         format_param = None
         response_mime_type = kwargs.get('response_mime_type', getattr(module, 'response_mime_type', self.response_mime_type))
         if structure or response_mime_type == "application/json":
-            format_param = 'json'
+            format_param = DEFAULT_FORMAT_JSON
 
         if stream and structure:
             logger.warning("Streaming is not supported with structured output in Ollama. Disabling streaming.")
@@ -115,15 +131,43 @@ class OllamaProvider(LLMProvider):
                     )
                     
                     def stream_wrapper():
+                        splitter = ThinkTagStreamSplitter()
+
                         for chunk in response_stream:
                             if chunk.get('done'):
                                 prompt_tokens = chunk.get('prompt_eval_count', 0)
                                 completion_tokens = chunk.get('eval_count', 0)
                                 total_duration = time.time() - start_time
                                 costs = cost_tracker.calculate_cost(model, prompt_tokens, completion_tokens)
-                                cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
+                                cost_tracker.record_transaction(
+                                    type(module).__name__,
+                                    model,
+                                    costs,
+                                    total_duration,
+                                    input_tokens=prompt_tokens,
+                                    output_tokens=completion_tokens,
+                                    cached_tokens=0,
+                                )
                                 logger.info(f"Ollama Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
-                            yield chunk
+
+                            if not return_reasoning:
+                                yield chunk
+                                continue
+
+                            message = chunk.get('message') or {}
+                            text, thought = splitter.feed(message.get('content'))
+                            thought = join_reasoning([
+                                message.get('thinking'),
+                                thought,
+                            ]) or ""
+
+                            if text or thought:
+                                yield [text, thought]
+
+                        if return_reasoning:
+                            text, thought = splitter.flush()
+                            if text or thought:
+                                yield [text, thought]
                     return stream_wrapper()
 
                 response = self.client.chat(
@@ -134,28 +178,43 @@ class OllamaProvider(LLMProvider):
                 )
                 
                 total_duration = time.time() - start_time
-                output_content = response['message']['content']
+                message = response['message']
+                output_content = message['content']
+                field_reasoning = message.get('thinking')
                 
                 prompt_tokens = response.get('prompt_eval_count', 0)
                 completion_tokens = response.get('eval_count', 0)
                 
                 costs = cost_tracker.calculate_cost(model, prompt_tokens, completion_tokens)
-                cost_tracker.record_transaction(type(module).__name__, model, costs, total_duration)
+                cost_tracker.record_transaction(
+                    type(module).__name__,
+                    model,
+                    costs,
+                    total_duration,
+                    input_tokens=prompt_tokens,
+                    output_tokens=completion_tokens,
+                    cached_tokens=0,
+                )
                 logger.info(f"Ollama Transaction Recorded: ${costs['total_cost']:.6f} total cost")
                 
+                # Strip inline thoughts before parsing, or the <think> block
+                # would make otherwise valid JSON unparseable.
+                output_content, inline_reasoning = split_think_tags(output_content)
+                reasoning = join_reasoning([field_reasoning, inline_reasoning])
+
                 if structure:
                     try:
                         parsed = json.loads(output_content)
                         if hasattr(structure, 'model_validate'):
-                             return structure.model_validate(parsed)
-                        return parsed
+                             parsed = structure.model_validate(parsed)
+                        return build_result(parsed, reasoning, return_reasoning)
                     except Exception as e:
                         logger.warning(f"Failed to parse Ollama JSON response: {e}")
                         if attempt < max_retries - 1:
-                            time.sleep(2)
+                            time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                             continue
                 
-                return output_content
+                return build_result(output_content, reasoning, return_reasoning)
 
             except ollama.ResponseError as e:
                 last_exception = e
@@ -168,17 +227,20 @@ class OllamaProvider(LLMProvider):
                         logger.info(f"Successfully pulled model '{model}'. Retrying generation...")
                         continue
                     except Exception as pull_error:
-                        logger.error(f"Failed to pull model '{model}': {pull_error}")
-                        last_exception = pull_error
-                        break
+                        logger.error(f"Failed to pull model '{model}' from Ollama Hub: {pull_error}")
+                        raise RuntimeError(
+                            f"Model '{model}' is not installed locally and could not be found or pulled from Ollama Hub. "
+                            f"Ensure the model name is correct. Error: {pull_error}"
+                        ) from pull_error
                 else:
                     logger.warning(f"Ollama response failed on attempt {attempt + 1} for model {model}: {e}")
-                    time.sleep(2)
+                    time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
+                    continue
 
             except Exception as e:
                 last_exception = e
                 logger.warning(f"Ollama response failed on attempt {attempt + 1} for model {model}: {e}")
-                time.sleep(2)
+                time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                 continue
         
         raise RuntimeError(f"Failed to get response from Ollama after {max_retries} attempts.") from last_exception
@@ -219,7 +281,15 @@ class OllamaProvider(LLMProvider):
             total_duration = time.time() - start_time
             
             costs = cost_tracker.calculate_cost(model, 0, 0)
-            cost_tracker.record_transaction("Embedding", model, costs, total_duration)
+            cost_tracker.record_transaction(
+                "Embedding",
+                model,
+                costs,
+                total_duration,
+                input_tokens=0,
+                output_tokens=0,
+                cached_tokens=0,
+            )
             
             if isinstance(text, str):
                 return embeddings[0]

@@ -1,5 +1,4 @@
 import os
-import inspect
 from core.llm_models.router import ModelRouter
 from core.modules.test_module import FileSummaryPrompt
 from utils.logger import get_logger
@@ -7,6 +6,15 @@ from utils.parallel_executor import parallel_execute
 
 # Initialize logger for this test script
 logger = get_logger("TestFile")
+
+# Top-level Constants
+RESULTS_DIR_NAME: str = "results"
+DEFAULT_TOTAL_CALLS: int = 1000
+DEFAULT_MAX_THREADS: int = 20
+DEFAULT_MAX_RETRIES: int = 1
+DEFAULT_RETRY_TIMER: float = 2.0
+FILE_ENCODING: str = "utf-8"
+
 
 def run_llm_call(index: int):
     """
@@ -22,11 +30,11 @@ def run_llm_call(index: int):
         full_response_text = str(response)
 
         # Ensure the results directory exists
-        os.makedirs("results", exist_ok=True)
+        os.makedirs(RESULTS_DIR_NAME, exist_ok=True)
         
         # Save the result to a file
-        file_path = f"results/{index}.md"
-        with open(file_path, "w", encoding="utf-8") as f:
+        file_path = os.path.join(RESULTS_DIR_NAME, f"{index}.md")
+        with open(file_path, "w", encoding=FILE_ENCODING) as f:
             f.write(full_response_text)
             
         logger.info(f"Call #{index} completed and saved to {file_path}")
@@ -36,21 +44,21 @@ def run_llm_call(index: int):
         logger.error(f"Error in parallel call #{index}: {e}")
         return e
 
+
 def main():
     # Number of parallel executions
-    total_calls = 1000
+    total_calls = DEFAULT_TOTAL_CALLS
     indices = list(range(total_calls))
     
-    logger.info(f"Starting parallel execution of 100 LLM calls...")
+    logger.info(f"Starting parallel execution of {total_calls} LLM calls...")
     
     # Execute the calls in parallel
-    # We use max_threads=20 to balance speed and system/API stability
     results = parallel_execute(
         target_function=run_llm_call,
         data=indices,
-        max_threads=20,
-        max_retries=1,
-        retry_timer=2
+        max_threads=DEFAULT_MAX_THREADS,
+        max_retries=DEFAULT_MAX_RETRIES,
+        retry_timer=DEFAULT_RETRY_TIMER
     )
     
     # Log summary of results

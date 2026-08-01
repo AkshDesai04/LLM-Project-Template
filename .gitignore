@@ -144,6 +144,11 @@ ENV/
 env.bak/
 venv.bak/
 
+# Google Cloud service-account key files (never commit these)
+*service-account*.json
+*-sa.json
+secrets/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -200,6 +205,7 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+.cursor/
 
 # Marimo
 marimo/_static/
