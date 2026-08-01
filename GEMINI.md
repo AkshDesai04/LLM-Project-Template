@@ -20,8 +20,8 @@ Defines the `Base` class, which extends Pydantic's `BaseModel`. This is the stan
     *   `prompt` (str): The specific text instruction for the LLM.
     *   `system_prompt` (str): Broad system guidelines injected dynamically.
     *   `structure` (Any): Optional Pydantic model enforcing a structured JSON output.
-    *   `model` (str): The primary model identifier in the canonical `provider/model` form (e.g., `"gemini/gemini-2.5-pro"`, `"openai/gpt-5.5-pro"`, `"anthropic/claude-opus-5"`).
-    *   `fallback_models` (list[str]): Alternative models attempted by `ModelRouter` if the primary fails, written in the same `provider/model` form. Defined only on module configs under `core/modules/`; providers never hardcode fallback names.
+    *   `model` (str | None): Optional primary model identifier in the canonical `provider/model` form (e.g., `"gemini/gemini-2.5-pro"`). Has no default value in `base.py`.
+    *   `models` (list[str]): List of model identifiers in canonical `provider/model` form. Defaults to `["gemini/gemini-2.5-pro", "gemini/gemini-2.5-flash", "gemini/gemini-2.5-flash-lite"]`. If both `model` and `models` exist, `model` is primary and `models` contains ordered fallbacks; if only `models` is specified, the first entry is primary and the remainder are ordered fallbacks.
     *   `temperature`, `top_p`, `top_k`, `max_tokens`: Standard LLM generation parameters.
     *   `reasoning_budget` (int | str): Controls deep thinking parameters native to advanced reasoning models (`o1`, `o3`, `gpt-5`, Gemini Thinking modes).
     *   `stream` (bool): Configures the model to dispatch chunked iterative generators instead of static single completions.
@@ -49,7 +49,7 @@ Singleton class defining the `CostTracker`. Calculates and stores multi-call met
 The unified factory entry point (`ModelRouter`). It abstracts the provider selection process. **IMPORTANT: When calling an LLM, you must default to using `ModelRouter`. Direct instantiation of provider-specific files should be avoided.**
 *   **Key Functions & Flow:**
     *   **`get_provider_by_model_name()`:** Reads the provider directly off the canonical `provider/model` prefix (`gemini/`, `openai/`, `anthropic/`, `perplexity/`, `ollama/`, `vllm/`). Because the provider is declared rather than inferred, a model released after this code was written routes correctly with no change to the router and no row in `assets/model_pricing.csv`. Unprefixed names still resolve through a legacy family guess that logs a warning.
-    *   **Initialization & Lazy Loading:** Builds the model chain from `module.model` + `module.fallback_models`. Only initializes the specific requisite module avoiding bloat and missing API key errors. Retrieves keys contextually through local `.env` definitions mapping them into the abstracted `LLMProvider`.
+    *   **Initialization & Lazy Loading:** Builds the model chain from `module.model` and/or `module.models`. Only initializes the specific requisite module avoiding bloat and missing API key errors. Retrieves keys contextually through local `.env` definitions mapping them into the abstracted `LLMProvider`.
     *   **Fallback Chain:** `model_response` walks the chain across providers. Each failed model is recorded as a zero-token `(failed)` row before the next fallback is attempted.
     *   **Proxy Methods:** Exposes core tasks cleanly bridging execution transparently without altering API interactions.
 

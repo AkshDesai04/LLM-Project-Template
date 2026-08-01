@@ -63,7 +63,7 @@ Unified entry point for dynamic model selection and routing across multiple LLM 
 
 #### Class: `ModelRouter`
 - **`__init__(self, module: BaseModule, fallback_index: int = 0)`**
-  - **Process:** Builds an order-preserving model chain from `module.model` + `module.fallback_models` (starting at `fallback_index`), identifies the necessary provider for the primary model, lazily imports the respective provider's class, and initializes the `LLMProvider` instance.
+  - **Process:** Builds an order-preserving model chain from `module.model` and/or `module.models` (starting at `fallback_index`), identifies the necessary provider for the primary model, lazily imports the respective provider's class, and initializes the `LLMProvider` instance.
 - **`model_response(...)`**
   - **Process:** Walks the model chain. On each failure, records a zero-token failed attempt via `CostTracker` and tries the next fallback (including cross-provider fallbacks). Raises if the entire chain fails.
 - **`get_provider_by_model_name(model_name: str) -> str` (static)**
@@ -174,7 +174,7 @@ Defines the standard configuration schema for application modules using Pydantic
 
 #### Class: `Base` (BaseModel)
 - **Core Parameters:** `prompt`, `system_prompt`, `structure`.
-- **Model Parameters:** `model` (default `"gemini-2.5-pro"`), `fallback_models` (consumed by `ModelRouter`, not by individual providers).
+- **Model Parameters:** `model` (optional `str`, no default model value), `models` (`list[str]`, default list of Gemini models). Consumed by `ModelRouter` to determine primary and ordered fallback models.
 - **Generation:** `temperature`, `top_p`, `top_k`, `max_tokens`, `reasoning_budget`.
 - **Sampling:** `presence_penalty`, `frequency_penalty`, `seed`, `stop_sequences`.
 - **Provider Features:** `response_mime_type`, `stream`, `logprobs`, `service_tier`, `tools`, `candidate_count`.

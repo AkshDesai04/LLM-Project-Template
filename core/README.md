@@ -38,7 +38,7 @@ from core.llm_models.router import ModelRouter
 class SummarisePrompt(Base):
     prompt: str = "Summarise the following document."
     model: str = "gemini/gemini-2.5-flash"
-    fallback_models: list[str] = ["openai/gpt-4o-mini"]
+    models: list[str] = ["openai/gpt-4o-mini"]
 
 module = SummarisePrompt()
 router = ModelRouter(module)

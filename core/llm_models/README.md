@@ -19,7 +19,7 @@ providers, falling back when one fails, and accounting for what it all cost live
 
 ```
 YourModule(Base)                    model = "gemini/gemini-2.5-flash"
-      |                             fallback_models = ["openai/gpt-4o", ...]
+      |                             models = ["openai/gpt-4o", ...]
       v
 ModelRouter(module)                 builds the ordered, de-duplicated chain
       |
@@ -47,7 +47,7 @@ fallback chain and forces you to import an SDK you may not have installed.
 
 ### `__init__(module: BaseModule, fallback_index: int = 0)`
 
-Builds `self._model_chain` as `[module.model] + module.fallback_models`, preserving
+Builds `self._model_chain` from `module.model` and/or `module.models`, preserving
 order and dropping duplicates, then slices from `fallback_index`. Raises `ValueError`
 if the index is out of range.
 
@@ -147,7 +147,7 @@ are read directly and will raise `AttributeError` if missing (`model`, `temperat
 `top_p`, `top_k`, plus `api_key`); the rest use `getattr` with a fallback, e.g.
 `self.max_tokens = getattr(base_config, 'max_tokens', None)`.
 
-It deliberately does **not** capture `prompt`, `fallback_models` or
+It deliberately does **not** capture `prompt`, `models` or
 `reasoning_budget`. Fallback selection is the router's job, prompts arrive per-call,
 and the reasoning budget is resolved at call time because providers accept both string
 effort levels and integer token budgets.

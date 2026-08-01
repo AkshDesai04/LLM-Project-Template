@@ -1,7 +1,7 @@
 # `core/modules/`
 
 Prompt configuration. A "module" is a Pydantic model that bundles a prompt with every
-setting the call needs — model, fallbacks, sampling, output schema — into one object you
+setting the call needs — model, models, sampling, output schema — into one object you
 hand to `ModelRouter`.
 
 This is the **only** place model names and fallback lists should be written. Providers
@@ -22,7 +22,7 @@ from core.llm_models.router import ModelRouter
 class SummarisePrompt(Base):
     prompt: str = "Summarise the following document."
     model: str = "gemini/gemini-2.5-flash"
-    fallback_models: list[str] = ["openai/gpt-4o-mini"]
+    models: list[str] = ["openai/gpt-4o-mini"]
     temperature: float = 0.0
 
 module = SummarisePrompt()
@@ -35,12 +35,12 @@ settings.
 
 ## Model naming
 
-`model` and every entry in `fallback_models` must use the canonical `provider/model`
+`model` and every entry in `models` must use the canonical `provider/model`
 form:
 
 ```python
 model: str = "anthropic/claude-opus-5"
-fallback_models: list[str] = ["gemini/gemini-2.5-pro", "openai/gpt-5.5-pro"]
+models: list[str] = ["gemini/gemini-2.5-pro", "openai/gpt-5.5-pro"]
 ```
 
 Valid prefixes are defined by `PROVIDER_ALIASES` in `core/llm_models/model_names.py`:
@@ -70,8 +70,8 @@ beyond their type hints.
 
 | Field | Type | Default |
 |---|---|---|
-| `model` | `str` | `"gemini/gemini-2.5-pro"` |
-| `fallback_models` | `list[str]` | `["gemini/gemini-2.5-flash", "gemini/gemini-2.5-flash-lite"]` |
+| `model` | `str \| None` | `None` (Optional primary model; no default value) |
+| `models` | `list[str]` | `["gemini/gemini-2.5-pro", "gemini/gemini-2.5-flash", "gemini/gemini-2.5-flash-lite"]` |
 
 ### Generation
 
@@ -145,7 +145,7 @@ Two things to notice:
 
 1. `read_prompt('test_prompt')` runs at **class-definition time**, i.e. on import. A
    missing `core/prompts/test_prompt.txt` breaks the import, not the request.
-2. It does not override `fallback_models`, so an OpenAI primary falls back to the
+2. It does not override `models`, so an OpenAI primary falls back to the
    inherited **Gemini** models. That cross-provider fallback is intentional and works,
    but it means a failure here needs `GEMINI_KEY` configured too.
 
