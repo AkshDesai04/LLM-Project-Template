@@ -72,11 +72,14 @@ def _get_secrets_manager_client():
         logger.error("boto3 is not installed. AWS Secrets Manager is unavailable.")
         raise ImportError("boto3 is not installed. AWS Secrets Manager is unavailable.")
 
-    load_dotenv()
-    region_name = os.getenv("AWS_REGION")
+    region_name = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
     if not region_name:
-        logger.error("AWS_REGION environment variable not set.")
-        raise ValueError("AWS_REGION environment variable must be set to use AWS Secrets Manager.")
+        load_dotenv()
+        region_name = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+
+    if not region_name:
+        logger.error("AWS_REGION or AWS_DEFAULT_REGION environment variable not set.")
+        raise ValueError("AWS_REGION or AWS_DEFAULT_REGION environment variable must be set to use AWS Secrets Manager.")
 
     logger.info(f"Initializing Boto3 Secrets Manager client for region: {region_name}")
     _secrets_manager_client = boto3.client("secretsmanager", region_name=region_name)
