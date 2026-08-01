@@ -15,22 +15,12 @@ class ModelRouter:
         model = getattr(module, 'model', None)
         models = getattr(module, 'models', None)
 
-        if model and models:
-            raw_chain = [model] + list(models)
-        elif models:
-            raw_chain = list(models)
-        elif model:
-            raw_chain = [model]
-        else:
-            raise ValueError("Module must specify at least 'model' or 'models'.")
+        chain = list(models) if models is not None else []
+        if model:
+            chain.insert(0, model)
 
-        # Build an order-preserving, de-duplicated chain starting at fallback_index
-        seen = set()
-        chain = []
-        for name in raw_chain:
-            if name and name not in seen:
-                seen.add(name)
-                chain.append(name)
+        if not chain:
+            raise ValueError("Module must specify at least 'model' or 'models'.")
 
         if fallback_index < 0 or fallback_index >= len(chain):
             raise ValueError(f"Fallback index {fallback_index} is out of range.")

@@ -1,4 +1,3 @@
-import pytest
 from core.modules.base import Base
 from core.llm_models.router import ModelRouter
 
@@ -70,15 +69,28 @@ def test_neither_model_nor_models_raises_error():
         models: list[str] = []
 
     module = EmptyModule()
-    with pytest.raises(ValueError, match="Module must specify at least 'model' or 'models'"):
+    try:
         ModelRouter(module)
+        assert False, "Expected ValueError when neither model nor models specified"
+    except ValueError as e:
+        assert "Module must specify at least 'model' or 'models'" in str(e)
 
 
-def test_deduplication_preserves_order():
+def test_model_prepending_without_deduplication():
     class DuplicateModule(Base):
         model: str = "openai/gpt-4o"
         models: list[str] = ["openai/gpt-4o", "gemini/gemini-2.5-flash", "openai/gpt-4o"]
 
     module = DuplicateModule()
     router = ModelRouter(module)
-    assert router._model_chain == ["openai/gpt-4o", "gemini/gemini-2.5-flash"]
+    assert router._model_chain == ["openai/gpt-4o", "openai/gpt-4o", "gemini/gemini-2.5-flash", "openai/gpt-4o"]
+
+
+if __name__ == '__main__':
+    test_base_defaults()
+    test_only_models_given()
+    test_both_model_and_models_given()
+    test_only_model_given()
+    test_neither_model_nor_models_raises_error()
+    test_model_prepending_without_deduplication()
+    print("All 6 model selection tests passed!")
