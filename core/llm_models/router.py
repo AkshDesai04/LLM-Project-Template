@@ -12,11 +12,19 @@ logger = get_logger("ModelRouter")
 
 class ModelRouter:
     def __init__(self, module: BaseModule, fallback_index: int = 0):
-        primary = module.model
-        fallbacks = getattr(module, 'fallback_models', None) or []
+        model = getattr(module, 'model', None)
+        models = getattr(module, 'models', None)
+
+        if model and models:
+            raw_chain = [model] + list(models)
+        elif models:
+            raw_chain = list(models)
+        elif model:
+            raw_chain = [model]
+        else:
+            raise ValueError("Module must specify at least 'model' or 'models'.")
 
         # Build an order-preserving, de-duplicated chain starting at fallback_index
-        raw_chain = [primary] + list(fallbacks)
         seen = set()
         chain = []
         for name in raw_chain:

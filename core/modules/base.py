@@ -11,9 +11,10 @@ class Base(BaseModel):
 
     # Model Selection. Canonical form is "provider/model"; see PROVIDER_ALIASES
     # in core/llm_models/router.py for the accepted prefixes.
-    model: str = "gemini/gemini-2.5-pro"
+    model: str | None = None
 
-    fallback_models: list[str] = [
+    models: list[str] = [
+        "gemini/gemini-2.5-pro",
         "gemini/gemini-2.5-flash",
         "gemini/gemini-2.5-flash-lite",
     ]
