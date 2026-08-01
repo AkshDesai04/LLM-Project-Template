@@ -445,80 +445,69 @@ class OpenAIProvider(LLMProvider):
                             if stream:
                                 def stream_wrapper():
                                     splitter = ThinkTagStreamSplitter()
+                                    last_prompt_tokens = 0
+                                    last_completion_tokens = 0
+                                    last_cached_tokens = 0
+                                    cost_recorded = False
 
-                                    for chunk in response:
-                                        if getattr(chunk, 'usage', None):
-                                            u = chunk.usage
+                                    try:
+                                        for chunk in response:
+                                            if getattr(chunk, 'usage', None):
+                                                u = chunk.usage
+                                                last_prompt_tokens = getattr(u, 'prompt_tokens', 0)
+                                                last_completion_tokens = getattr(u, 'completion_tokens', 0)
+                                                last_cached_tokens = getattr(
+                                                    getattr(u, 'prompt_tokens_details', None),
+                                                    'cached_tokens',
+                                                    0
+                                                )
 
-                                            prompt_tokens = getattr(
-                                                u,
-                                                'prompt_tokens',
-                                                0
+                                            if not return_reasoning:
+                                                yield chunk
+                                                continue
+
+                                            delta = getattr(
+                                                (chunk.choices or [None])[0], 'delta', None
+                                            ) if getattr(chunk, 'choices', None) else None
+
+                                            text, thought = splitter.feed(
+                                                getattr(delta, 'content', None)
                                             )
+                                            thought = join_reasoning([
+                                                getattr(delta, 'reasoning_content', None),
+                                                thought,
+                                            ]) or ""
 
-                                            completion_tokens = getattr(
-                                                u,
-                                                'completion_tokens',
-                                                0
-                                            )
+                                            if text or thought:
+                                                yield [text, thought]
 
-                                            cached_tokens = getattr(
-                                                getattr(
-                                                    u,
-                                                    'prompt_tokens_details',
-                                                    None
-                                                ),
-                                                'cached_tokens',
-                                                0
-                                            )
-
+                                        if return_reasoning:
+                                            text, thought = splitter.flush()
+                                            if text or thought:
+                                                yield [text, thought]
+                                    finally:
+                                        if not cost_recorded:
                                             total_duration = time.time() - start_time
-
                                             costs = cost_tracker.calculate_cost(
                                                 model,
-                                                prompt_tokens,
-                                                completion_tokens,
-                                                cached_tokens
+                                                last_prompt_tokens,
+                                                last_completion_tokens,
+                                                last_cached_tokens
                                             )
-
                                             cost_tracker.record_transaction(
                                                 type(module).__name__,
                                                 model,
                                                 costs,
                                                 total_duration,
-                                                input_tokens=prompt_tokens,
-                                                output_tokens=completion_tokens,
-                                                cached_tokens=cached_tokens,
+                                                input_tokens=last_prompt_tokens,
+                                                output_tokens=last_completion_tokens,
+                                                cached_tokens=last_cached_tokens,
                                             )
-
+                                            cost_recorded = True
                                             logger.info(
                                                 f"OpenAI Stream Transaction Recorded: "
                                                 f"${costs['total_cost']:.6f} total cost"
                                             )
-
-                                        if not return_reasoning:
-                                            yield chunk
-                                            continue
-
-                                        delta = getattr(
-                                            (chunk.choices or [None])[0], 'delta', None
-                                        ) if getattr(chunk, 'choices', None) else None
-
-                                        text, thought = splitter.feed(
-                                            getattr(delta, 'content', None)
-                                        )
-                                        thought = join_reasoning([
-                                            getattr(delta, 'reasoning_content', None),
-                                            thought,
-                                        ]) or ""
-
-                                        if text or thought:
-                                            yield [text, thought]
-
-                                    if return_reasoning:
-                                        text, thought = splitter.flush()
-                                        if text or thought:
-                                            yield [text, thought]
 
                                 return stream_wrapper()
 
