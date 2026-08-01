@@ -186,10 +186,18 @@ class PerplexityProvider(LLMProvider):
         [AI Generated Response]: {generated_output}
         [Evaluation Rubric]: {rubric if rubric else "Evaluate based on accuracy, clarity, and adherence to the prompt."}
         Please provide a score from 1-10, your reasoning, and any suggestions for improvement.
+        Return your response in JSON format with fields: score (int), reasoning (str), improvements (str).
         """
         class JudgeModule(BaseModule):
             prompt: str = judge_prompt
+            response_mime_type: str = "application/json"
             model: str = self.model_name
 
         raw_output = self.model_response(JudgeModule())
-        return JudgeResult(score=5, reasoning=raw_output, improvements="")
+        try:
+            import json
+            parsed = json.loads(raw_output) if isinstance(raw_output, str) else raw_output
+            return JudgeResult.model_validate(parsed)
+        except Exception:
+            logger.warning("Could not parse judge response as JudgeResult; returning raw text as reasoning.")
+            return JudgeResult(score=0, reasoning=str(raw_output), improvements="")
