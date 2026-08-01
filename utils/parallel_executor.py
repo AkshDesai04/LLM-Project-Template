@@ -7,6 +7,13 @@ from utils.logger import get_logger
 
 logger = get_logger("ParallelExecutor")
 
+# Top-level Constants
+SECONDS_PER_MINUTE: float = 60.0
+DEFAULT_MAX_RETRIES: int = 0
+DEFAULT_RETRY_TIMER: float = 0.0
+DEFAULT_MAX_THREADS: int = 0
+DEFAULT_CPU_FALLBACK: int = 1
+
 
 class ThreadSafeRateLimiter:
     """
@@ -14,7 +21,7 @@ class ThreadSafeRateLimiter:
     """
 
     def __init__(self, max_per_minute: int):
-        self.interval = 60.0 / max_per_minute
+        self.interval = SECONDS_PER_MINUTE / max_per_minute
         self.lock = threading.Lock()
         self.last_check = 0.0
 
@@ -70,11 +77,11 @@ def _worker_wrapper(
     return last_exception
 
 
-def calculate_worker_count(max_threads: int = 0, data_size: int = 0) -> int:
+def calculate_worker_count(max_threads: int = DEFAULT_MAX_THREADS, data_size: int = 0) -> int:
     """
     Determines the number of threads based on user rules.
     """
-    cpu_count = os.cpu_count() or 1
+    cpu_count = os.cpu_count() or DEFAULT_CPU_FALLBACK
     
     if max_threads == 0:
         count = data_size if data_size > 0 else 1
