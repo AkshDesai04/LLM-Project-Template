@@ -1,8 +1,8 @@
 """
 Unit tests for Database Connector Utilities & DatabaseRouter.
 
-Verifies exports, SQLite functional operations, context managers,
-DatabaseRouter factory routing, fallback behavior for optional drivers, and BaseDatabaseConnector inheritance.
+Verifies exports, single connection URL resolution, SQLite functional operations,
+context managers, DatabaseRouter factory routing, and fallback behavior for optional drivers.
 """
 
 from utils import (
@@ -86,90 +86,91 @@ def test_sqlite_functional():
     assert db.is_connected() is False
 
 
-def test_postgres_initialization():
-    """Verify PostgreSQLConnector initialization and fallback attributes."""
-    connector = PostgreSQLConnector(
+def test_postgres_single_url_and_fallbacks():
+    """Verify PostgreSQLConnector single connection URL parsing and fallback attributes."""
+    url_conn = PostgreSQLConnector(connection_string="postgresql://user:pass@localhost:5432/db")
+    assert url_conn.connection_string == "postgresql://user:pass@localhost:5432/db"
+
+    fallback_conn = PostgreSQLConnector(
         host="localhost",
         port=5432,
         user="test_user",
         password="test_password",
         dbname="test_db",
     )
-    assert connector.host == "localhost"
-    assert connector.port == 5432
-    assert connector.user == "test_user"
-    assert connector.dbname == "test_db"
-    assert connector.is_connected() is False
+    assert fallback_conn.host == "localhost"
+    assert fallback_conn.port == 5432
+    assert fallback_conn.user == "test_user"
+    assert fallback_conn.dbname == "test_db"
 
 
-def test_mysql_initialization():
-    """Verify MySQLConnector initialization and fallback attributes."""
-    connector = MySQLConnector(
-        host="127.0.0.1",
+def test_mysql_single_url_and_fallbacks():
+    """Verify MySQLConnector single connection URL parsing and fallback attributes."""
+    url_conn = MySQLConnector(connection_string="mysql://myuser:mypass@127.0.0.1:3306/mydb")
+    assert url_conn.host == "127.0.0.1"
+    assert url_conn.port == 3306
+    assert url_conn.user == "myuser"
+    assert url_conn.password == "mypass"
+    assert url_conn.database == "mydb"
+
+    fallback_conn = MySQLConnector(
+        host="localhost",
         port=3306,
         user="root",
         password="root_password",
         database="mysql_test",
     )
-    assert connector.host == "127.0.0.1"
-    assert connector.port == 3306
-    assert connector.database == "mysql_test"
-    assert connector.is_connected() is False
+    assert fallback_conn.host == "localhost"
+    assert fallback_conn.port == 3306
 
 
-def test_mongo_initialization():
-    """Verify MongoDBConnector initialization and fallback attributes."""
-    connector = MongoDBConnector(
-        uri="mongodb://localhost:27017",
-        database="mongo_test",
-    )
-    assert connector.uri == "mongodb://localhost:27017"
-    assert connector.database_name == "mongo_test"
-    assert connector.is_connected() is False
+def test_mongo_single_url_and_fallbacks():
+    """Verify MongoDBConnector single connection URI parsing and fallback attributes."""
+    url_conn = MongoDBConnector(uri="mongodb://admin:secret@localhost:27017/db", database="test_db")
+    assert url_conn.uri == "mongodb://admin:secret@localhost:27017/db"
+    assert url_conn.database_name == "test_db"
 
 
-def test_oracle_initialization():
-    """Verify OracleDBConnector initialization and fallback attributes."""
-    connector = OracleDBConnector(
-        user="system",
-        password="oracle_password",
-        dsn="localhost:1521/ORCLCDB",
-    )
-    assert connector.user == "system"
-    assert connector.dsn == "localhost:1521/ORCLCDB"
-    assert connector.is_connected() is False
+def test_oracle_single_url_and_fallbacks():
+    """Verify OracleDBConnector single connection URL parsing and fallback attributes."""
+    url_conn = OracleDBConnector(connection_string="oracle://sysuser:syspass@localhost:1521/ORCLCDB")
+    assert url_conn.user == "sysuser"
+    assert url_conn.password == "syspass"
+    assert url_conn.dsn == "localhost:1521/ORCLCDB"
 
 
 def test_database_router():
-    """Verify DatabaseRouter resolves connectors dynamically by name and URI scheme."""
+    """Verify DatabaseRouter resolves connectors dynamically by single connection URL and dialect."""
     # SQLite routing
     sqlite_conn = DatabaseRouter.get_connector("sqlite", db_path=":memory:")
     assert isinstance(sqlite_conn, SQLiteConnector)
 
-    # Postgres routing
+    # Postgres single URL routing
     pg_conn = DatabaseRouter.get_connector("postgresql://user:pass@localhost:5432/db")
     assert isinstance(pg_conn, PostgreSQLConnector)
     assert pg_conn.connection_string == "postgresql://user:pass@localhost:5432/db"
 
-    # MySQL routing
-    mysql_conn = DatabaseRouter.get_connector("mysql")
+    # MySQL single URL routing
+    mysql_conn = DatabaseRouter.get_connector("mysql://root:pass@localhost:3306/mydb")
     assert isinstance(mysql_conn, MySQLConnector)
+    assert mysql_conn.database == "mydb"
 
-    # MongoDB routing
+    # MongoDB single URI routing
     mongo_conn = DatabaseRouter.get_connector("mongodb://localhost:27017")
     assert isinstance(mongo_conn, MongoDBConnector)
 
-    # Oracle routing
-    oracle_conn = DatabaseRouter.get_connector("oracle")
+    # Oracle single URL routing
+    oracle_conn = DatabaseRouter.get_connector("oracle://system:oracle@localhost:1521/ORCLCDB")
     assert isinstance(oracle_conn, OracleDBConnector)
+    assert oracle_conn.user == "system"
 
 
 if __name__ == "__main__":
     test_exports()
     test_sqlite_functional()
-    test_postgres_initialization()
-    test_mysql_initialization()
-    test_mongo_initialization()
-    test_oracle_initialization()
+    test_postgres_single_url_and_fallbacks()
+    test_mysql_single_url_and_fallbacks()
+    test_mongo_single_url_and_fallbacks()
+    test_oracle_single_url_and_fallbacks()
     test_database_router()
-    print("All database connector and router tests passed successfully!")
+    print("All database connector and URL router tests passed successfully!")

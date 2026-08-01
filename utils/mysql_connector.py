@@ -1,12 +1,13 @@
 """
 MySQL Database Connector.
 
-Provides a robust MySQL connector using pymysql with support for connection parameters,
+Provides a robust MySQL connector using pymysql with support for connection URLs,
 environment variable fallbacks, DictCursor row formatting, and transactions.
 """
 
 import contextlib
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib.parse import unquote, urlparse
 
 try:
     import pymysql
@@ -17,7 +18,7 @@ except ImportError:
     pymysql = None
 
 from utils.base_connector import BaseDatabaseConnector
-from utils.env_ops import get_secret
+from utils.env_ops import get_database_url, get_secret
 from utils.logger import get_logger
 
 logger = get_logger("MySQLConnector")
@@ -27,17 +28,13 @@ class MySQLConnector(BaseDatabaseConnector):
     """
     Connector for MySQL relational databases.
 
-    Attributes:
-        host (str): Database host address.
-        port (int): Database port number (default: 3306).
-        user (str): Database username.
-        password (str): Database password.
-        database (str): Target database name.
-        charset (str): Character set (default: utf8mb4).
+    Primary configuration uses a single connection URL (MYSQL_URL or DATABASE_URL).
+    Individual connection attributes serve as secondary fallbacks.
     """
 
     def __init__(
         self,
+        connection_string: Optional[str] = None,
         host: Optional[str] = None,
         port: Optional[int] = None,
         user: Optional[str] = None,
@@ -47,13 +44,31 @@ class MySQLConnector(BaseDatabaseConnector):
     ):
         """
         Initializes MySQL connector parameters.
-        Parameters fall back to environment variables via utils.env_ops if omitted.
+        Prioritizes connection_string / MYSQL_URL / DATABASE_URL, falling back to individual parameters.
         """
-        self.host = host or get_secret("MYSQL_HOST", raise_error=False) or "localhost"
-        self.port = port or int(get_secret("MYSQL_PORT", raise_error=False) or 3306)
-        self.user = user or get_secret("MYSQL_USER", raise_error=False)
-        self.password = password or get_secret("MYSQL_PASSWORD", raise_error=False)
-        self.database = database or get_secret("MYSQL_DB", raise_error=False)
+        self.connection_string = (
+            connection_string
+            or get_secret("MYSQL_URL", raise_error=False)
+            or get_database_url(raise_error=False)
+        )
+        
+        parsed_host, parsed_port, parsed_user, parsed_pass, parsed_db = None, None, None, None, None
+        if self.connection_string and self.connection_string.startswith("mysql"):
+            try:
+                parsed = urlparse(self.connection_string)
+                parsed_host = parsed.hostname
+                parsed_port = parsed.port
+                parsed_user = unquote(parsed.username) if parsed.username else None
+                parsed_pass = unquote(parsed.password) if parsed.password else None
+                parsed_db = parsed.path.lstrip("/") if parsed.path else None
+            except Exception as e:
+                logger.warning(f"Could not parse MySQL connection_string '{self.connection_string}': {e}")
+
+        self.host = host or parsed_host or get_secret("MYSQL_HOST", raise_error=False) or "localhost"
+        self.port = port or parsed_port or int(get_secret("MYSQL_PORT", raise_error=False) or 3306)
+        self.user = user or parsed_user or get_secret("MYSQL_USER", raise_error=False)
+        self.password = password or parsed_pass or get_secret("MYSQL_PASSWORD", raise_error=False)
+        self.database = database or parsed_db or get_secret("MYSQL_DB", raise_error=False)
         self.charset = charset
         self._connection = None
         self._in_transaction: bool = False

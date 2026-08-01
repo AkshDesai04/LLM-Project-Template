@@ -2,7 +2,7 @@
 Database Router & Factory.
 
 Provides a unified factory entry point (DatabaseRouter) for instantiating
-database connectors by name, dialect, or connection string URL.
+database connectors by name, dialect, or single connection string URL.
 All connector credentials seamlessly resolve via utils.env_ops (honouring KEY_LOCATION
 to fetch credentials from .env or AWS Secrets Manager).
 """
@@ -89,7 +89,7 @@ class DatabaseRouter:
 
         Args:
             db_type_or_url: Dialect name (e.g. 'postgres', 'sqlite', 'mysql', 'mongo', 'oracle')
-                            or connection string URL. If None, defaults to DATABASE_URL or 'sqlite'.
+                            or single connection string URL. If None, defaults to DATABASE_URL or 'sqlite'.
             **kwargs: Direct overrides for connector initialization parameters.
 
         Returns:
@@ -102,9 +102,10 @@ class DatabaseRouter:
 
         if dialect == DIALECT_SQLITE:
             db_path = kwargs.pop("db_path", None)
-            if not db_path and "://" in identifier:
+            connection_string = kwargs.pop("connection_string", None)
+            if not db_path and not connection_string and ("/" in identifier or "\\" in identifier or identifier.endswith(".db")):
                 db_path = identifier
-            return SQLiteConnector(db_path=db_path, **kwargs)
+            return SQLiteConnector(db_path=db_path, connection_string=connection_string, **kwargs)
 
         if dialect == DIALECT_POSTGRES:
             connection_string = kwargs.pop("connection_string", None)
@@ -113,18 +114,23 @@ class DatabaseRouter:
             return PostgreSQLConnector(connection_string=connection_string, **kwargs)
 
         if dialect == DIALECT_MYSQL:
-            return MySQLConnector(**kwargs)
+            connection_string = kwargs.pop("connection_string", None)
+            if not connection_string and "://" in identifier:
+                connection_string = identifier
+            return MySQLConnector(connection_string=connection_string, **kwargs)
 
         if dialect == DIALECT_MONGO:
             uri = kwargs.pop("uri", None)
-            if not uri and "://" in identifier:
+            connection_string = kwargs.pop("connection_string", None)
+            if not uri and not connection_string and "://" in identifier:
                 uri = identifier
-            return MongoDBConnector(uri=uri, **kwargs)
+            return MongoDBConnector(uri=uri, connection_string=connection_string, **kwargs)
 
         if dialect == DIALECT_ORACLE:
+            connection_string = kwargs.pop("connection_string", None)
             dsn = kwargs.pop("dsn", None)
-            if not dsn and ("/" in identifier or ":" in identifier):
-                dsn = identifier
-            return OracleDBConnector(dsn=dsn, **kwargs)
+            if not connection_string and not dsn and ("://" in identifier or "/" in identifier or ":" in identifier):
+                connection_string = identifier
+            return OracleDBConnector(connection_string=connection_string, dsn=dsn, **kwargs)
 
         raise ValueError(f"Unable to route database connector for dialect '{dialect}'.")

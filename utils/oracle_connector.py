@@ -2,11 +2,12 @@
 OracleDB Database Connector.
 
 Provides a robust Oracle database connector using modern python-oracledb with support for
-connection parameters, environment variable fallbacks, dictionary row mapping, and transactions.
+connection URLs, environment variable fallbacks, dictionary row mapping, and transactions.
 """
 
 import contextlib
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib.parse import unquote, urlparse
 
 try:
     import oracledb
@@ -16,7 +17,7 @@ except ImportError:
     oracledb = None
 
 from utils.base_connector import BaseDatabaseConnector
-from utils.env_ops import get_secret
+from utils.env_ops import get_database_url, get_secret
 from utils.logger import get_logger
 
 logger = get_logger("OracleDBConnector")
@@ -26,37 +27,55 @@ class OracleDBConnector(BaseDatabaseConnector):
     """
     Connector for Oracle Database instances.
 
-    Attributes:
-        user (str): Oracle DB username.
-        password (str): Oracle DB password.
-        dsn (str): Connection Data Source Name or EZConnect string.
-        host (str): Host address.
-        port (int): Port number (default: 1521).
-        service_name (str): Oracle service name.
+    Primary configuration uses a single connection URL or DSN (ORACLE_URL, ORACLE_DSN, or DATABASE_URL).
+    Individual connection attributes serve as secondary fallbacks.
     """
 
     def __init__(
         self,
+        connection_string: Optional[str] = None,
+        dsn: Optional[str] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
-        dsn: Optional[str] = None,
         host: Optional[str] = None,
         port: Optional[int] = None,
         service_name: Optional[str] = None,
     ):
         """
         Initializes OracleDB connector parameters.
-        Parameters fall back to environment variables via utils.env_ops if omitted.
+        Prioritizes connection_string / dsn / ORACLE_URL / ORACLE_DSN / DATABASE_URL, falling back to individual parameters.
         """
-        self.user = user or get_secret("ORACLE_USER", raise_error=False)
-        self.password = password or get_secret("ORACLE_PASSWORD", raise_error=False)
-        self.host = host or get_secret("ORACLE_HOST", raise_error=False) or "localhost"
-        self.port = port or int(get_secret("ORACLE_PORT", raise_error=False) or 1521)
-        self.service_name = service_name or get_secret("ORACLE_SERVICE_NAME", raise_error=False)
-        self.dsn = dsn or get_secret("ORACLE_DSN", raise_error=False)
+        url = (
+            connection_string
+            or get_secret("ORACLE_URL", raise_error=False)
+            or get_database_url(raise_error=False)
+        )
 
-        if not self.dsn and self.host and self.service_name:
-            self.dsn = f"{self.host}:{self.port}/{self.service_name}"
+        parsed_user, parsed_pass, parsed_dsn = None, None, None
+        if url and (url.startswith("oracle") or "://" in url):
+            try:
+                parsed = urlparse(url)
+                parsed_user = unquote(parsed.username) if parsed.username else None
+                parsed_pass = unquote(parsed.password) if parsed.password else None
+                h = parsed.hostname or "localhost"
+                p = parsed.port or 1521
+                s = parsed.path.lstrip("/") if parsed.path else ""
+                parsed_dsn = f"{h}:{p}/{s}" if s else f"{h}:{p}"
+            except Exception as e:
+                logger.warning(f"Could not parse Oracle connection URL '{url}': {e}")
+
+        self.user = user or parsed_user or get_secret("ORACLE_USER", raise_error=False)
+        self.password = password or parsed_pass or get_secret("ORACLE_PASSWORD", raise_error=False)
+        self.dsn = dsn or parsed_dsn or get_secret("ORACLE_DSN", raise_error=False)
+
+        if not self.dsn:
+            host_val = host or get_secret("ORACLE_HOST", raise_error=False) or "localhost"
+            port_val = port or int(get_secret("ORACLE_PORT", raise_error=False) or 1521)
+            svc_val = service_name or get_secret("ORACLE_SERVICE_NAME", raise_error=False)
+            if svc_val:
+                self.dsn = f"{host_val}:{port_val}/{svc_val}"
+            else:
+                self.dsn = f"{host_val}:{port_val}"
 
         self._connection = None
         self._in_transaction: bool = False

@@ -1,7 +1,7 @@
 """
 PostgreSQL Database Connector.
 
-Provides a robust PostgreSQL connector using psycopg2 with support for connection parameters,
+Provides a robust PostgreSQL connector using psycopg2 with support for connection URLs,
 environment variable fallbacks, RealDictCursor row formatting, and transactions.
 """
 
@@ -27,30 +27,29 @@ class PostgreSQLConnector(BaseDatabaseConnector):
     """
     Connector for PostgreSQL relational databases.
 
-    Attributes:
-        host (str): Database host address.
-        port (int): Database port number (default: 5432).
-        user (str): Database username.
-        password (str): Database password.
-        dbname (str): Target database name.
-        sslmode (str): SSL connection mode.
+    Primary configuration uses a single connection URL (POSTGRES_URL or DATABASE_URL).
+    Individual connection attributes serve as secondary fallbacks.
     """
 
     def __init__(
         self,
+        connection_string: Optional[str] = None,
         host: Optional[str] = None,
         port: Optional[int] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
         dbname: Optional[str] = None,
         sslmode: Optional[str] = None,
-        connection_string: Optional[str] = None,
     ):
         """
         Initializes PostgreSQL connector parameters.
-        Parameters fall back to environment variables via utils.env_ops if omitted.
+        Prioritizes connection_string / POSTGRES_URL / DATABASE_URL, falling back to individual parameters.
         """
-        self.connection_string = connection_string or get_database_url(raise_error=False)
+        self.connection_string = (
+            connection_string
+            or get_secret("POSTGRES_URL", raise_error=False)
+            or get_database_url(raise_error=False)
+        )
         self.host = host or get_secret("POSTGRES_HOST", raise_error=False) or "localhost"
         self.port = port or int(get_secret("POSTGRES_PORT", raise_error=False) or 5432)
         self.user = user or get_secret("POSTGRES_USER", raise_error=False)
@@ -74,7 +73,7 @@ class PostgreSQLConnector(BaseDatabaseConnector):
 
         if self._connection is None or self._connection.closed != 0:
             logger.info("Connecting to PostgreSQL database...")
-            if self.connection_string and self.connection_string.startswith("postgres"):
+            if self.connection_string:
                 self._connection = psycopg2.connect(self.connection_string)
             else:
                 kwargs = {

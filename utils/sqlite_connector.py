@@ -20,22 +20,22 @@ class SQLiteConnector(BaseDatabaseConnector):
     """
     Connector for SQLite relational databases.
 
-    Attributes:
-        db_path (str): File path to SQLite database or ':memory:'.
-        timeout (float): Connection timeout in seconds.
+    Primary configuration uses a single connection URL or path (SQLITE_URL, SQLITE_DB_PATH, or DATABASE_URL).
     """
 
-    def __init__(self, db_path: Optional[str] = None, timeout: float = 10.0):
+    def __init__(self, db_path: Optional[str] = None, connection_string: Optional[str] = None, timeout: float = 10.0):
         """
         Initializes the SQLite connector configuration.
 
         Args:
-            db_path: Path to .db file or ':memory:'. If None, resolves from
-                     SQLITE_DB_PATH or DATABASE_URL env vars.
+            db_path: Path to .db file or ':memory:'. If None, resolves from connection URL / env vars.
+            connection_string: Connection URL e.g. 'sqlite:///path/to/db.sqlite'.
             timeout: Command timeout in seconds.
         """
         resolved_path = (
             db_path
+            or connection_string
+            or get_secret("SQLITE_URL", raise_error=False)
             or get_secret("SQLITE_DB_PATH", raise_error=False)
             or get_database_url(raise_error=False)
             or ":memory:"

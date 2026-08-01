@@ -18,7 +18,7 @@ except ImportError:
     pymongo = None
 
 from utils.base_connector import BaseDatabaseConnector
-from utils.env_ops import get_secret
+from utils.env_ops import get_database_url, get_secret
 from utils.logger import get_logger
 
 logger = get_logger("MongoDBConnector")
@@ -28,14 +28,14 @@ class MongoDBConnector(BaseDatabaseConnector):
     """
     Connector for MongoDB document databases.
 
-    Attributes:
-        uri (str): Connection URI string (e.g. mongodb://localhost:27017).
-        database_name (str): Target database name.
+    Primary configuration uses a single connection URI (MONGODB_URI, MONGODB_URL, or DATABASE_URL).
+    Individual connection attributes serve as secondary fallbacks.
     """
 
     def __init__(
         self,
         uri: Optional[str] = None,
+        connection_string: Optional[str] = None,
         host: Optional[str] = None,
         port: Optional[int] = None,
         username: Optional[str] = None,
@@ -44,12 +44,18 @@ class MongoDBConnector(BaseDatabaseConnector):
     ):
         """
         Initializes MongoDB connector parameters.
-        Falls back to MONGODB_URI, MONGODB_DB, or host/user secrets if omitted.
+        Prioritizes uri / connection_string / MONGODB_URI / MONGODB_URL / DATABASE_URL, falling back to individual parameters.
         """
         self.database_name = database or get_secret("MONGODB_DB", raise_error=False) or "test"
-        resolved_uri = uri or get_secret("MONGODB_URI", raise_error=False)
+        resolved_uri = (
+            uri
+            or connection_string
+            or get_secret("MONGODB_URI", raise_error=False)
+            or get_secret("MONGODB_URL", raise_error=False)
+            or get_database_url(raise_error=False)
+        )
 
-        if not resolved_uri:
+        if not resolved_uri or not (resolved_uri.startswith("mongodb://") or resolved_uri.startswith("mongodb+srv://")):
             host_val = host or get_secret("MONGODB_HOST", raise_error=False) or "localhost"
             port_val = port or int(get_secret("MONGODB_PORT", raise_error=False) or 27017)
             user_val = username or get_secret("MONGODB_USER", raise_error=False)
