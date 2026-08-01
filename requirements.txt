@@ -75,3 +75,13 @@ olefile==0.47
 # video processing
 opencv-python-headless==4.9.0.80
 numpy==1.26.4
+
+
+# ============================================
+# Database Connectors (Optional)
+# ============================================
+
+psycopg2-binary>=2.9.9
+pymysql>=1.1.0
+pymongo>=4.6.0
+oracledb>=2.0.0

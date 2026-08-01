@@ -13,8 +13,14 @@ belongs in `core/` instead.
 | `file_ops.py` | Text, binary, prompt and CSV reads | `FileOps` |
 | `parallel_executor.py` | Thread-pool fan-out with retries and rate limiting | `ParallelExecutor` |
 | `markitdown_utils.py` | Document/URL/media → Markdown via MarkItDown | `MarkItDownUtils` |
+| `base_connector.py` | Abstract Base Class interface for database connectors | `BaseDatabaseConnector` |
+| `sqlite_connector.py` | SQLite3 database connector (std library) | `SQLiteConnector` |
+| `postgres_connector.py` | PostgreSQL database connector (psycopg2) | `PostgreSQLConnector` |
+| `mysql_connector.py` | MySQL database connector (pymysql) | `MySQLConnector` |
+| `mongo_connector.py` | MongoDB document connector (pymongo) | `MongoDBConnector` |
+| `oracle_connector.py` | OracleDB database connector (oracledb) | `OracleDBConnector` |
 
-`__init__.py` is empty. Import from the concrete module: `from utils.file_ops import read_csv`.
+Import directly from `utils` or concrete modules: `from utils import SQLiteConnector, PostgreSQLConnector`.
 
 The dependency graph is a star. `logger.py` imports nothing local; the other four import
 only `utils.logger`. None of them import each other, so they can be used independently.
@@ -213,3 +219,46 @@ guard, so importing this module fails if `markitdown` is absent.
 
 The `__main__` block at the bottom references `./tests/test_files/0.pdf`, which does not
 exist in this repo, and uses a CWD-relative path — it will not run as written.
+
+---
+
+## Database Connectors
+
+A unified suite of database connectors providing interoperable interfaces for relational and document databases:
+
+### `BaseDatabaseConnector` (`utils/base_connector.py`)
+Abstract base class standardizing database interaction methods across all connectors:
+- `connect()` -> Connection object
+- `close()` -> None
+- `is_connected()` -> bool
+- `execute_query(query, params=None)` -> `list[dict]`
+- `execute_non_query(query, params=None)` -> `int` (affected rows)
+- `execute_many(query, params_list)` -> `int`
+- `fetch_one(query, params=None)` -> `dict | None`
+- `transaction()` -> Context manager for auto-commit/rollback
+- Context manager (`with Connector() as db:`) for automatic session cleanup
+
+### `SQLiteConnector` (`utils/sqlite_connector.py`)
+Lightweight local relational database connector leveraging standard library `sqlite3`.
+- Default database path: `:memory:` or resolved via `SQLITE_DB_PATH` / `DATABASE_URL`.
+- Uses `sqlite3.Row` row factory to format query outputs as dictionaries.
+
+### `PostgreSQLConnector` (`utils/postgres_connector.py`)
+PostgreSQL connector using `psycopg2`.
+- Resolves parameters via `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_SSLMODE`, or `DATABASE_URL`.
+- Uses `RealDictCursor` for dictionary output formatting.
+
+### `MySQLConnector` (`utils/mysql_connector.py`)
+MySQL connector using `pymysql`.
+- Resolves parameters via `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB`.
+- Uses `DictCursor` for dictionary output formatting.
+
+### `MongoDBConnector` (`utils/mongo_connector.py`)
+MongoDB document connector using `pymongo`.
+- Native document methods: `find_documents`, `insert_document`, `insert_many_documents`, `update_documents`, `delete_documents`, `count_documents`, `aggregate`.
+- Provides an interoperable `BaseDatabaseConnector` query facade.
+
+### `OracleDBConnector` (`utils/oracle_connector.py`)
+Oracle Database connector using modern `oracledb`.
+- Resolves parameters via `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_HOST`, `ORACLE_PORT`, `ORACLE_SERVICE_NAME`, `ORACLE_DSN`.
+- Converts cursor column descriptions into lowercase dictionary keys.
