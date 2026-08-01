@@ -67,30 +67,26 @@ class CostTracker:
                     "cached": to_float(row.get('context_caching_cost_per_million')),
                     "input_above_200k": to_float(row.get('input_cost_per_million_above_200k')),
                     "output_above_200k": to_float(row.get('output_cost_per_million_above_200k')),
+                    "api_type": (row.get('api_type') or '').strip(),
                 }
         except Exception as e:
             logger.error(f"Failed to load pricing from {csv_path}: {e}")
         return pricing_data
 
-    def calculate_cost(self, model_name: str, prompt_tokens: int, output_tokens: int, cached_tokens: int = 0) -> dict:
-        """Calculates estimated cost based on token counts, including tiered pricing thresholds."""
-        # Pricing rows are keyed by the bare model id, so tolerate a caller that
-        # passes the canonical "provider/model" form.
+    def get_model_api_type(self, model_name: str) -> Optional[str]:
+        """Returns the api_type (e.g. 'chat_completions', 'responses') configured for an OpenAI model if available."""
         model_name = strip_provider_prefix(model_name)
         rates = self.pricing.get(model_name)
+        if rates:
+            api_type = rates.get("api_type")
+            if api_type and api_type.upper() != "N/A":
+                return api_type
+        return None
 
-        if not rates:
-            # Fall back to the most specific matching key. Taking the first match
-            # instead would let a short id shadow a longer one that shares its
-            # prefix, e.g. 'gpt-5' capturing 'gpt-5.5-pro-2026-01-15'.
-            matches = [key for key in self.pricing if key in model_name]
-            if matches:
-                best_match = max(matches, key=len)
-                rates = self.pricing[best_match]
-                logger.info(
-                    f"No exact pricing row for '{model_name}'; "
-                    f"using the closest match '{best_match}'."
-                )
+    def calculate_cost(self, model_name: str, prompt_tokens: int, output_tokens: int, cached_tokens: int = 0) -> dict:
+        """Calculates estimated cost based on token counts, including tiered pricing thresholds."""
+        model_name = strip_provider_prefix(model_name)
+        rates = self.pricing.get(model_name)
 
         if not rates:
             logger.warning(
