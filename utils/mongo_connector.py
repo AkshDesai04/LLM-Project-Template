@@ -1,8 +1,8 @@
 """
 MongoDB Database Connector.
 
-Provides a robust MongoDB connector using pymongo with support for connection URIs,
-document CRUD operations, aggregation pipelines, transactions, and an interoperable query facade.
+Provides a robust MongoDB connector using pymongo configured via single connection URIs,
+with support for document CRUD operations, aggregation pipelines, transactions, and an interoperable query facade.
 """
 
 import contextlib
@@ -26,25 +26,18 @@ logger = get_logger("MongoDBConnector")
 
 class MongoDBConnector(BaseDatabaseConnector):
     """
-    Connector for MongoDB document databases.
-
-    Primary configuration uses a single connection URI (MONGODB_URI, MONGODB_URL, or DATABASE_URL).
-    Individual connection attributes serve as secondary fallbacks.
+    Connector for MongoDB document databases configured via a single connection URI.
     """
 
     def __init__(
         self,
         uri: Optional[str] = None,
         connection_string: Optional[str] = None,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
         database: Optional[str] = None,
     ):
         """
-        Initializes MongoDB connector parameters.
-        Prioritizes uri / connection_string / MONGODB_URI / MONGODB_URL / DATABASE_URL, falling back to individual parameters.
+        Initializes MongoDB connector using a connection URI.
+        Resolves from uri / connection_string / MONGODB_URI / MONGODB_URL / DATABASE_URL env vars.
         """
         self.database_name = database or get_secret("MONGODB_DB", raise_error=False) or "test"
         resolved_uri = (
@@ -53,18 +46,8 @@ class MongoDBConnector(BaseDatabaseConnector):
             or get_secret("MONGODB_URI", raise_error=False)
             or get_secret("MONGODB_URL", raise_error=False)
             or get_database_url(raise_error=False)
+            or "mongodb://localhost:27017"
         )
-
-        if not resolved_uri or not (resolved_uri.startswith("mongodb://") or resolved_uri.startswith("mongodb+srv://")):
-            host_val = host or get_secret("MONGODB_HOST", raise_error=False) or "localhost"
-            port_val = port or int(get_secret("MONGODB_PORT", raise_error=False) or 27017)
-            user_val = username or get_secret("MONGODB_USER", raise_error=False)
-            pass_val = password or get_secret("MONGODB_PASSWORD", raise_error=False)
-
-            if user_val and pass_val:
-                resolved_uri = f"mongodb://{user_val}:{pass_val}@{host_val}:{port_val}"
-            else:
-                resolved_uri = f"mongodb://{host_val}:{port_val}"
 
         self.uri = resolved_uri
         self._client = None
@@ -83,7 +66,7 @@ class MongoDBConnector(BaseDatabaseConnector):
             raise ImportError(message)
 
         if self._client is None:
-            logger.info("Connecting to MongoDB instance...")
+            logger.info("Connecting to MongoDB instance via URI...")
             self._client = pymongo.MongoClient(self.uri, serverSelectionTimeoutMS=5000)
             self._db = self._client[self.database_name]
             logger.info(f"Successfully connected to MongoDB database '{self.database_name}'.")

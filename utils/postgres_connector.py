@@ -1,8 +1,8 @@
 """
 PostgreSQL Database Connector.
 
-Provides a robust PostgreSQL connector using psycopg2 with support for connection URLs,
-environment variable fallbacks, RealDictCursor row formatting, and transactions.
+Provides a robust PostgreSQL connector using psycopg2 with support for single connection URLs
+and transactions.
 """
 
 import contextlib
@@ -25,37 +25,22 @@ logger = get_logger("PostgreSQLConnector")
 
 class PostgreSQLConnector(BaseDatabaseConnector):
     """
-    Connector for PostgreSQL relational databases.
-
-    Primary configuration uses a single connection URL (POSTGRES_URL or DATABASE_URL).
-    Individual connection attributes serve as secondary fallbacks.
+    Connector for PostgreSQL relational databases using a single connection URL.
     """
 
     def __init__(
         self,
         connection_string: Optional[str] = None,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
-        dbname: Optional[str] = None,
-        sslmode: Optional[str] = None,
     ):
         """
-        Initializes PostgreSQL connector parameters.
-        Prioritizes connection_string / POSTGRES_URL / DATABASE_URL, falling back to individual parameters.
+        Initializes PostgreSQL connector using a connection URL.
+        Resolves from connection_string / POSTGRES_URL / DATABASE_URL env vars.
         """
         self.connection_string = (
             connection_string
             or get_secret("POSTGRES_URL", raise_error=False)
             or get_database_url(raise_error=False)
         )
-        self.host = host or get_secret("POSTGRES_HOST", raise_error=False) or "localhost"
-        self.port = port or int(get_secret("POSTGRES_PORT", raise_error=False) or 5432)
-        self.user = user or get_secret("POSTGRES_USER", raise_error=False)
-        self.password = password or get_secret("POSTGRES_PASSWORD", raise_error=False)
-        self.dbname = dbname or get_secret("POSTGRES_DB", raise_error=False)
-        self.sslmode = sslmode or get_secret("POSTGRES_SSLMODE", raise_error=False) or "prefer"
         self._connection = None
         self._in_transaction: bool = False
 
@@ -72,20 +57,10 @@ class PostgreSQLConnector(BaseDatabaseConnector):
             raise ImportError(message)
 
         if self._connection is None or self._connection.closed != 0:
-            logger.info("Connecting to PostgreSQL database...")
-            if self.connection_string:
-                self._connection = psycopg2.connect(self.connection_string)
-            else:
-                kwargs = {
-                    "host": self.host,
-                    "port": self.port,
-                    "user": self.user,
-                    "password": self.password,
-                    "dbname": self.dbname,
-                    "sslmode": self.sslmode,
-                }
-                filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
-                self._connection = psycopg2.connect(**filtered_kwargs)
+            if not self.connection_string:
+                raise ValueError("No PostgreSQL connection URL provided (set POSTGRES_URL or DATABASE_URL).")
+            logger.info("Connecting to PostgreSQL database via connection URL...")
+            self._connection = psycopg2.connect(self.connection_string)
             logger.info("Successfully connected to PostgreSQL database.")
         return self._connection
 

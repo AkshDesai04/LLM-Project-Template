@@ -1,8 +1,8 @@
 """
 MySQL Database Connector.
 
-Provides a robust MySQL connector using pymysql with support for connection URLs,
-environment variable fallbacks, DictCursor row formatting, and transactions.
+Provides a robust MySQL connector using pymysql with support for single connection URLs,
+DictCursor row formatting, and transactions.
 """
 
 import contextlib
@@ -26,49 +26,23 @@ logger = get_logger("MySQLConnector")
 
 class MySQLConnector(BaseDatabaseConnector):
     """
-    Connector for MySQL relational databases.
-
-    Primary configuration uses a single connection URL (MYSQL_URL or DATABASE_URL).
-    Individual connection attributes serve as secondary fallbacks.
+    Connector for MySQL relational databases configured via a single connection URL.
     """
 
     def __init__(
         self,
         connection_string: Optional[str] = None,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
-        database: Optional[str] = None,
         charset: str = "utf8mb4",
     ):
         """
-        Initializes MySQL connector parameters.
-        Prioritizes connection_string / MYSQL_URL / DATABASE_URL, falling back to individual parameters.
+        Initializes MySQL connector parameters using a single connection URL.
+        Resolves from connection_string / MYSQL_URL / DATABASE_URL env vars.
         """
         self.connection_string = (
             connection_string
             or get_secret("MYSQL_URL", raise_error=False)
             or get_database_url(raise_error=False)
         )
-        
-        parsed_host, parsed_port, parsed_user, parsed_pass, parsed_db = None, None, None, None, None
-        if self.connection_string and self.connection_string.startswith("mysql"):
-            try:
-                parsed = urlparse(self.connection_string)
-                parsed_host = parsed.hostname
-                parsed_port = parsed.port
-                parsed_user = unquote(parsed.username) if parsed.username else None
-                parsed_pass = unquote(parsed.password) if parsed.password else None
-                parsed_db = parsed.path.lstrip("/") if parsed.path else None
-            except Exception as e:
-                logger.warning(f"Could not parse MySQL connection_string '{self.connection_string}': {e}")
-
-        self.host = host or parsed_host or get_secret("MYSQL_HOST", raise_error=False) or "localhost"
-        self.port = port or parsed_port or int(get_secret("MYSQL_PORT", raise_error=False) or 3306)
-        self.user = user or parsed_user or get_secret("MYSQL_USER", raise_error=False)
-        self.password = password or parsed_pass or get_secret("MYSQL_PASSWORD", raise_error=False)
-        self.database = database or parsed_db or get_secret("MYSQL_DB", raise_error=False)
         self.charset = charset
         self._connection = None
         self._in_transaction: bool = False
@@ -86,13 +60,23 @@ class MySQLConnector(BaseDatabaseConnector):
             raise ImportError(message)
 
         if self._connection is None or not self._connection.open:
-            logger.info(f"Connecting to MySQL database '{self.database}' at {self.host}:{self.port}...")
+            if not self.connection_string:
+                raise ValueError("No MySQL connection URL provided (set MYSQL_URL or DATABASE_URL).")
+
+            logger.info("Connecting to MySQL database via connection URL...")
+            parsed = urlparse(self.connection_string)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 3306
+            user = unquote(parsed.username) if parsed.username else None
+            password = unquote(parsed.password) if parsed.password else None
+            database = parsed.path.lstrip("/") if parsed.path else None
+
             kwargs = {
-                "host": self.host,
-                "port": self.port,
-                "user": self.user,
-                "password": self.password,
-                "database": self.database,
+                "host": host,
+                "port": port,
+                "user": user,
+                "password": password,
+                "database": database,
                 "charset": self.charset,
                 "cursorclass": pymysql.cursors.DictCursor,
                 "autocommit": False,

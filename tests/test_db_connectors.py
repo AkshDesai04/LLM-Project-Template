@@ -86,57 +86,35 @@ def test_sqlite_functional():
     assert db.is_connected() is False
 
 
-def test_postgres_single_url_and_fallbacks():
-    """Verify PostgreSQLConnector single connection URL parsing and fallback attributes."""
+def test_postgres_url_configuration():
+    """Verify PostgreSQLConnector connection URL resolution."""
     url_conn = PostgreSQLConnector(connection_string="postgresql://user:pass@localhost:5432/db")
     assert url_conn.connection_string == "postgresql://user:pass@localhost:5432/db"
-
-    fallback_conn = PostgreSQLConnector(
-        host="localhost",
-        port=5432,
-        user="test_user",
-        password="test_password",
-        dbname="test_db",
-    )
-    assert fallback_conn.host == "localhost"
-    assert fallback_conn.port == 5432
-    assert fallback_conn.user == "test_user"
-    assert fallback_conn.dbname == "test_db"
+    assert url_conn.is_connected() is False
 
 
-def test_mysql_single_url_and_fallbacks():
-    """Verify MySQLConnector single connection URL parsing and fallback attributes."""
+def test_mysql_url_configuration():
+    """Verify MySQLConnector connection URL resolution."""
     url_conn = MySQLConnector(connection_string="mysql://myuser:mypass@127.0.0.1:3306/mydb")
-    assert url_conn.host == "127.0.0.1"
-    assert url_conn.port == 3306
-    assert url_conn.user == "myuser"
-    assert url_conn.password == "mypass"
-    assert url_conn.database == "mydb"
-
-    fallback_conn = MySQLConnector(
-        host="localhost",
-        port=3306,
-        user="root",
-        password="root_password",
-        database="mysql_test",
-    )
-    assert fallback_conn.host == "localhost"
-    assert fallback_conn.port == 3306
+    assert url_conn.connection_string == "mysql://myuser:mypass@127.0.0.1:3306/mydb"
+    assert url_conn.is_connected() is False
 
 
-def test_mongo_single_url_and_fallbacks():
-    """Verify MongoDBConnector single connection URI parsing and fallback attributes."""
+def test_mongo_url_configuration():
+    """Verify MongoDBConnector connection URI resolution."""
     url_conn = MongoDBConnector(uri="mongodb://admin:secret@localhost:27017/db", database="test_db")
     assert url_conn.uri == "mongodb://admin:secret@localhost:27017/db"
     assert url_conn.database_name == "test_db"
+    assert url_conn.is_connected() is False
 
 
-def test_oracle_single_url_and_fallbacks():
-    """Verify OracleDBConnector single connection URL parsing and fallback attributes."""
+def test_oracle_url_configuration():
+    """Verify OracleDBConnector connection URL resolution."""
     url_conn = OracleDBConnector(connection_string="oracle://sysuser:syspass@localhost:1521/ORCLCDB")
     assert url_conn.user == "sysuser"
     assert url_conn.password == "syspass"
     assert url_conn.dsn == "localhost:1521/ORCLCDB"
+    assert url_conn.is_connected() is False
 
 
 def test_database_router():
@@ -153,7 +131,6 @@ def test_database_router():
     # MySQL single URL routing
     mysql_conn = DatabaseRouter.get_connector("mysql://root:pass@localhost:3306/mydb")
     assert isinstance(mysql_conn, MySQLConnector)
-    assert mysql_conn.database == "mydb"
 
     # MongoDB single URI routing
     mongo_conn = DatabaseRouter.get_connector("mongodb://localhost:27017")
@@ -168,9 +145,9 @@ def test_database_router():
 if __name__ == "__main__":
     test_exports()
     test_sqlite_functional()
-    test_postgres_single_url_and_fallbacks()
-    test_mysql_single_url_and_fallbacks()
-    test_mongo_single_url_and_fallbacks()
-    test_oracle_single_url_and_fallbacks()
+    test_postgres_url_configuration()
+    test_mysql_url_configuration()
+    test_mongo_url_configuration()
+    test_oracle_url_configuration()
     test_database_router()
     print("All database connector and URL router tests passed successfully!")

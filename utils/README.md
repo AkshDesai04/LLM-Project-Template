@@ -251,20 +251,21 @@ Lightweight local relational database connector leveraging standard library `sql
 
 ### `PostgreSQLConnector` (`utils/postgres_connector.py`)
 PostgreSQL connector using `psycopg2`.
-- Resolves parameters via `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_SSLMODE`, or `DATABASE_URL`.
+- Resolves single connection URL via `POSTGRES_URL` or `DATABASE_URL`.
 - Uses `RealDictCursor` for dictionary output formatting.
 
 ### `MySQLConnector` (`utils/mysql_connector.py`)
 MySQL connector using `pymysql`.
-- Resolves parameters via `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB`.
+- Resolves single connection URL via `MYSQL_URL` or `DATABASE_URL`.
 - Uses `DictCursor` for dictionary output formatting.
 
 ### `MongoDBConnector` (`utils/mongo_connector.py`)
 MongoDB document connector using `pymongo`.
+- Resolves single connection URI via `MONGODB_URI`, `MONGODB_URL`, or `DATABASE_URL`.
 - Native document methods: `find_documents`, `insert_document`, `insert_many_documents`, `update_documents`, `delete_documents`, `count_documents`, `aggregate`.
 - Provides an interoperable `BaseDatabaseConnector` query facade.
 
 ### `OracleDBConnector` (`utils/oracle_connector.py`)
 Oracle Database connector using modern `oracledb`.
-- Resolves parameters via `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_HOST`, `ORACLE_PORT`, `ORACLE_SERVICE_NAME`, `ORACLE_DSN`.
+- Resolves single connection URL/DSN via `ORACLE_URL`, `ORACLE_DSN`, or `DATABASE_URL`.
 - Converts cursor column descriptions into lowercase dictionary keys.

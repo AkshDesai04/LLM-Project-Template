@@ -1,8 +1,8 @@
 """
 OracleDB Database Connector.
 
-Provides a robust Oracle database connector using modern python-oracledb with support for
-connection URLs, environment variable fallbacks, dictionary row mapping, and transactions.
+Provides a robust Oracle database connector using modern python-oracledb configured via single connection URLs or DSNs,
+dictionary row mapping, and transactions.
 """
 
 import contextlib
@@ -25,58 +25,45 @@ logger = get_logger("OracleDBConnector")
 
 class OracleDBConnector(BaseDatabaseConnector):
     """
-    Connector for Oracle Database instances.
-
-    Primary configuration uses a single connection URL or DSN (ORACLE_URL, ORACLE_DSN, or DATABASE_URL).
-    Individual connection attributes serve as secondary fallbacks.
+    Connector for Oracle Database instances configured via a single connection URL or DSN.
     """
 
     def __init__(
         self,
         connection_string: Optional[str] = None,
         dsn: Optional[str] = None,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        service_name: Optional[str] = None,
     ):
         """
-        Initializes OracleDB connector parameters.
-        Prioritizes connection_string / dsn / ORACLE_URL / ORACLE_DSN / DATABASE_URL, falling back to individual parameters.
+        Initializes OracleDB connector parameters using a single connection URL or DSN.
+        Resolves from connection_string / dsn / ORACLE_URL / ORACLE_DSN / DATABASE_URL env vars.
         """
         url = (
             connection_string
+            or dsn
             or get_secret("ORACLE_URL", raise_error=False)
+            or get_secret("ORACLE_DSN", raise_error=False)
             or get_database_url(raise_error=False)
         )
 
         parsed_user, parsed_pass, parsed_dsn = None, None, None
-        if url and (url.startswith("oracle") or "://" in url):
-            try:
-                parsed = urlparse(url)
-                parsed_user = unquote(parsed.username) if parsed.username else None
-                parsed_pass = unquote(parsed.password) if parsed.password else None
-                h = parsed.hostname or "localhost"
-                p = parsed.port or 1521
-                s = parsed.path.lstrip("/") if parsed.path else ""
-                parsed_dsn = f"{h}:{p}/{s}" if s else f"{h}:{p}"
-            except Exception as e:
-                logger.warning(f"Could not parse Oracle connection URL '{url}': {e}")
-
-        self.user = user or parsed_user or get_secret("ORACLE_USER", raise_error=False)
-        self.password = password or parsed_pass or get_secret("ORACLE_PASSWORD", raise_error=False)
-        self.dsn = dsn or parsed_dsn or get_secret("ORACLE_DSN", raise_error=False)
-
-        if not self.dsn:
-            host_val = host or get_secret("ORACLE_HOST", raise_error=False) or "localhost"
-            port_val = port or int(get_secret("ORACLE_PORT", raise_error=False) or 1521)
-            svc_val = service_name or get_secret("ORACLE_SERVICE_NAME", raise_error=False)
-            if svc_val:
-                self.dsn = f"{host_val}:{port_val}/{svc_val}"
+        if url:
+            clean_url = url[9:] if url.startswith("oracle://") else url
+            if "@" in clean_url:
+                creds, target = clean_url.split("@", 1)
+                if ":" in creds:
+                    parsed_user, parsed_pass = creds.split(":", 1)
+                    parsed_user = unquote(parsed_user)
+                    parsed_pass = unquote(parsed_pass)
+                else:
+                    parsed_user = unquote(creds)
+                parsed_dsn = target
             else:
-                self.dsn = f"{host_val}:{port_val}"
+                parsed_dsn = clean_url
 
+        self.user = parsed_user
+        self.password = parsed_pass
+        self.dsn = parsed_dsn
+        self.connection_string = url
         self._connection = None
         self._in_transaction: bool = False
 
@@ -93,14 +80,13 @@ class OracleDBConnector(BaseDatabaseConnector):
             raise ImportError(message)
 
         if self._connection is None:
-            logger.info("Connecting to Oracle Database...")
-            kwargs = {
-                "user": self.user,
-                "password": self.password,
-                "dsn": self.dsn,
-            }
-            filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
-            self._connection = oracledb.connect(**filtered_kwargs)
+            if not self.dsn and not self.connection_string:
+                raise ValueError("No Oracle connection URL or DSN provided (set ORACLE_URL, ORACLE_DSN, or DATABASE_URL).")
+            logger.info("Connecting to Oracle Database via connection URL/DSN...")
+            if self.user and self.password:
+                self._connection = oracledb.connect(user=self.user, password=self.password, dsn=self.dsn)
+            else:
+                self._connection = oracledb.connect(dsn=self.dsn)
             logger.info("Successfully connected to Oracle Database.")
         return self._connection
 
