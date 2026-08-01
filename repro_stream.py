@@ -6,13 +6,18 @@ import inspect
 # Initialize logger
 logger = get_logger("ReproScript")
 
+# Top-level Constants
+DEFAULT_STREAM_FLAG: bool = True
+UNKNOWN_MODEL_NAME: str = "unknown"
+
+
 def main():
     prompt_module = FileSummaryPrompt()
     # Ensure stream is True for this test
-    prompt_module.stream = True
+    prompt_module.stream = DEFAULT_STREAM_FLAG
     
     router = ModelRouter(prompt_module)
-    active_model = prompt_module.model or (prompt_module.models[0] if prompt_module.models else "unknown")
+    active_model = prompt_module.model or (prompt_module.models[0] if prompt_module.models else UNKNOWN_MODEL_NAME)
     print(f"Calling model_response for {active_model}...")
     response = router.model_response(prompt_module)
     
