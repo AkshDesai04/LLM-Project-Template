@@ -28,7 +28,7 @@ def process_video_frames(video_bytes: bytes, frames_per_second: int = 1) -> List
     """
     MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB limit
     if len(video_bytes) > MAX_FILE_SIZE:
-        raise ValueError("Video file exceeds the maximum allowed size of 50MB.")
+        raise ValueError("Video file exceeds the maximum allowed size of 512MB.")
 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
     temp_file.write(video_bytes)
