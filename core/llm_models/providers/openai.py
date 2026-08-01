@@ -300,7 +300,13 @@ class OpenAIProvider(LLMProvider):
                 parsed_object = None
                 reasoning = None
 
-                use_responses_api = self._requires_responses_api(model)
+                configured_api_type = cost_tracker.get_model_api_type(model)
+                if configured_api_type == "responses":
+                    use_responses_api = True
+                elif configured_api_type == "chat_completions":
+                    use_responses_api = False
+                else:
+                    use_responses_api = self._requires_responses_api(model)
 
                 # ============================================================
                 # RESPONSES API FLOW
@@ -385,6 +391,7 @@ class OpenAIProvider(LLMProvider):
                                 "include_usage": True
                             }
 
+                    # TODO: Refactor parameter scrubbing for reasoning models (o1/o3/o4/gpt-5) into declarative model spec metadata.
                     is_reasoning_model = self._is_reasoning_model(model)
 
                     if is_reasoning_model:
