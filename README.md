@@ -204,7 +204,7 @@ Handles secret management and environment variables natively or via AWS.
 Standardized file operations.
 - **`read_file(file_path: str)`**: Reads `utf-8` text.
 - **`get_file(file_path: str)`**: Grabs raw binary data.
-- **`read_prompt(prompt_tite: str)`**: Short-hand fetch for `.txt` files within `core/prompts`.
+- **`read_prompt(prompt_title: str)`**: Short-hand fetch for `.txt` files within `core/prompts`.
 - **`read_csv(file_path: str)`**: Reads CSV rows utilizing the standard dictionary reader.
 
 ### File: `utils/logger.py`
