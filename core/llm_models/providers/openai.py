@@ -25,6 +25,16 @@ from core.modules.base import Base as BaseModule
 
 logger = get_logger("OpenAIProvider")
 
+# Top-level Constants
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_RETRY_SLEEP_SECONDS: float = 2.0
+REASONING_MODEL_PATTERNS: tuple = ("o1", "o3", "o4", "gpt-5")
+RESPONSES_ONLY_PATTERNS: tuple = ("gpt-5.5-pro", "gpt-5-pro")
+CHAT_COMPLETION_ERROR_PATTERNS: tuple = (
+    "not a chat model",
+    "not supported in the v1/chat/completions endpoint",
+)
+
 
 class OpenAIProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
@@ -35,7 +45,7 @@ class OpenAIProvider(LLMProvider):
     @staticmethod
     def _is_reasoning_model(model: str) -> bool:
         model = model.lower()
-        return any(x in model for x in ["o1", "o3", "o4", "gpt-5"])
+        return any(x in model for x in REASONING_MODEL_PATTERNS)
 
     @staticmethod
     def _requires_responses_api(model: str) -> bool:
@@ -43,22 +53,12 @@ class OpenAIProvider(LLMProvider):
         Models that should use the Responses API instead of Chat Completions.
         """
         model = model.lower()
-
-        responses_only_patterns = [
-            "gpt-5.5-pro",
-            "gpt-5-pro",
-        ]
-
-        return any(p in model for p in responses_only_patterns)
+        return any(p in model for p in RESPONSES_ONLY_PATTERNS)
 
     @staticmethod
     def _is_chat_completion_endpoint_error(error: Exception) -> bool:
         error_str = str(error).lower()
-
-        return (
-            "not a chat model" in error_str
-            or "not supported in the v1/chat/completions endpoint" in error_str
-        )
+        return any(p in error_str for p in CHAT_COMPLETION_ERROR_PATTERNS)
 
     def _build_responses_input(self, messages: List[dict]) -> List[dict]:
         """
@@ -296,7 +296,7 @@ class OpenAIProvider(LLMProvider):
             })
 
         last_exception = None
-        max_retries = kwargs.get('max_retries', 3)
+        max_retries = kwargs.get('max_retries', DEFAULT_MAX_RETRIES)
 
         logger.info(f"Attempting generation with model: {model}")
 
@@ -603,7 +603,7 @@ class OpenAIProvider(LLMProvider):
                     f"{attempt + 1} for model {model}: {e}"
                 )
 
-                time.sleep(2)
+                time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                 continue
 
         raise RuntimeError(
