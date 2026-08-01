@@ -170,11 +170,20 @@ class OpenAIProvider(LLMProvider):
             response_kwargs["max_output_tokens"] = max_tokens
 
         if structure:
-            response_kwargs["text"] = {
-                "format": {
-                    "type": "json_object"
+            if inspect.isclass(structure) and issubclass(structure, BaseModel):
+                response_kwargs["text"] = {
+                    "format": {
+                        "type": "json_schema",
+                        "name": structure.__name__,
+                        "schema": structure.model_json_schema(),
+                    }
                 }
-            }
+            else:
+                response_kwargs["text"] = {
+                    "format": {
+                        "type": "json_object"
+                    }
+                }
 
         response = self.client.responses.create(**response_kwargs)
 
