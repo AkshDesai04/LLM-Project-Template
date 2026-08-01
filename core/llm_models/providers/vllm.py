@@ -30,10 +30,11 @@ except ImportError:
 
 logger = get_logger("VLLMProvider")
 
-DEFAULT_VLLM_URL = "http://localhost:8000/v1"
-
-# vLLM only checks the key when the server was started with --api-key.
-PLACEHOLDER_API_KEY = "EMPTY"
+# Top-level Constants
+DEFAULT_VLLM_URL: str = "http://localhost:8000/v1"
+PLACEHOLDER_API_KEY: str = "EMPTY"
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_RETRY_SLEEP_SECONDS: float = 2.0
 
 
 class VLLMProvider(LLMProvider):
@@ -172,7 +173,7 @@ class VLLMProvider(LLMProvider):
             call_kwargs["extra_body"] = extra_body
 
         last_exception = None
-        max_retries = kwargs.get('max_retries', 3)
+        max_retries = kwargs.get('max_retries', DEFAULT_MAX_RETRIES)
 
         logger.info(f"Attempting generation with model: {model} (vLLM @ {self.base_url})")
         for attempt in range(max_retries):
@@ -274,7 +275,7 @@ class VLLMProvider(LLMProvider):
                         logger.warning(f"Failed to parse structured vLLM response: {e}")
                         if attempt < max_retries - 1:
                             last_exception = e
-                            time.sleep(2)
+                            time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                             continue
 
                 return build_result(output_content, reasoning, return_reasoning)
@@ -282,7 +283,7 @@ class VLLMProvider(LLMProvider):
             except Exception as e:
                 last_exception = e
                 logger.warning(f"vLLM response failed on attempt {attempt + 1} for model {model}: {e}")
-                time.sleep(2)
+                time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                 continue
 
         raise RuntimeError(
