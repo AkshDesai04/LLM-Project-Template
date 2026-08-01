@@ -188,7 +188,3 @@ def convert_to_markdown(source: str, **kwargs) -> str:
     converter = MarkItDownUtils(**kwargs)
     return converter.convert(source)
 
-
-if __name__ == "__main__":
-    utils = MarkItDownUtils()
-    print(utils.convert("./tests/test_files/0.pdf"))

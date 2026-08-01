@@ -166,29 +166,3 @@ def parallel_execute(
     logger.info(f"Parallel execution finished in {duration:.2f}s.")
     return results
 
-
-if __name__ == "__main__":
-    def sample_task(x, y):
-        time.sleep(0.5)
-        if x == 2:
-            raise ValueError("Simulated error")
-        return x + y
-
-    input_data = [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]
-
-    print("Running parallel execution...")
-    output = parallel_execute(
-        target_function=sample_task,
-        data=input_data,
-        max_threads=-1,
-        max_req_per_min=600,
-        max_retries=2,
-        retry_timer=0.1
-    )
-
-    print("Results:")
-    for i, res in enumerate(output):
-        if isinstance(res, Exception):
-            print(f"Index {i}: Task failed with error -> {res}")
-        else:
-            print(f"Index {i}: Success -> {res}")
