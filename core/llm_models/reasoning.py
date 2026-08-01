@@ -14,21 +14,22 @@ answered. reasoning is None when the model did not produce one.
 import re
 from typing import Any, Iterable, Optional, Tuple
 
-# TODO: Standardize thought extraction once all target model backends provide native reasoning API fields.
+DEFAULT_RETURN_REASONING_FALLBACK: bool = False
+
+# Tag Matching Patterns
 THINK_TAG_PATTERN = re.compile(
     r"<(think|thinking|reasoning)>(.*?)</\1>",
     re.DOTALL | re.IGNORECASE,
 )
+OPEN_THINK_TAG_PATTERN = re.compile(r"<(?:think|thinking|reasoning)>", re.IGNORECASE)
+CLOSE_THINK_TAG_PATTERN = re.compile(r"</(?:think|thinking|reasoning)>", re.IGNORECASE)
 
-_OPEN_TAG_PATTERN = re.compile(r"<(?:think|thinking|reasoning)>", re.IGNORECASE)
-_CLOSE_TAG_PATTERN = re.compile(r"</(?:think|thinking|reasoning)>", re.IGNORECASE)
-
-# The longest tag we recognise. A stream is held back by this much so a tag
+# The longest tag we recognize. A stream is held back by this much so a tag
 # split across two chunks is never emitted as content.
-_MAX_TAG_LEN = len("</reasoning>")
+MAX_TAG_BUFFER_LEN: int = len("</reasoning>")
 
 
-def resolve_return_reasoning(module: Any, kwargs: dict, fallback: bool = False) -> bool:
+def resolve_return_reasoning(module: Any, kwargs: dict, fallback: bool = DEFAULT_RETURN_REASONING_FALLBACK) -> bool:
     """Resolves the flag with the same kwargs > module > provider order as
     every other setting in model_response."""
     return bool(
@@ -97,7 +98,7 @@ class ThinkTagStreamSplitter:
         reasoning_parts = []
 
         while True:
-            pattern = _CLOSE_TAG_PATTERN if self._in_thought else _OPEN_TAG_PATTERN
+            pattern = CLOSE_THINK_TAG_PATTERN if self._in_thought else OPEN_THINK_TAG_PATTERN
             match = pattern.search(self._buffer)
             if not match:
                 break
@@ -108,7 +109,7 @@ class ThinkTagStreamSplitter:
             self._in_thought = not self._in_thought
 
         # Release everything that can no longer be the opening of a tag.
-        releasable = len(self._buffer) - _MAX_TAG_LEN
+        releasable = len(self._buffer) - MAX_TAG_BUFFER_LEN
         if releasable > 0:
             target = reasoning_parts if self._in_thought else content_parts
             target.append(self._buffer[:releasable])
