@@ -26,9 +26,9 @@ def get_file(file_path: str) -> bytes:
         return f.read()
 
 
-def read_prompt(prompt_tite: str) -> str:
+def read_prompt(prompt_title: str) -> str:
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    prompt_path = os.path.join(base_dir, "core", "prompts", f"{prompt_tite}.txt")
+    prompt_path = os.path.join(base_dir, "core", "prompts", f"{prompt_title}.txt")
     return read_file(prompt_path)
 
 
