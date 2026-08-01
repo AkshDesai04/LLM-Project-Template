@@ -22,15 +22,23 @@ from core.modules.base import Base as BaseModule
 
 logger = get_logger("OllamaProvider")
 
+# Top-level Constants
+DEFAULT_OLLAMA_URL: str = "http://localhost:11434"
+DEFAULT_OLLAMA_KEY: str = "local-key"
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_RETRY_SLEEP_SECONDS: float = 2.0
+DEFAULT_FORMAT_JSON: str = "json"
+
+
 class OllamaProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
         """
         api_key is not strictly required for Ollama but kept for interface consistency.
         OLLAMA_URL and OLLAMA_KEY should be set in .env if needed.
         """
-        api_key = api_key or get_secret("OLLAMA_KEY", raise_error=False) or "local-key"
+        api_key = api_key or get_secret("OLLAMA_KEY", raise_error=False) or DEFAULT_OLLAMA_KEY
         super().__init__(api_key, base)
-        ollama_url = get_secret("OLLAMA_URL", raise_error=False) or "http://localhost:11434"
+        ollama_url = get_secret("OLLAMA_URL", raise_error=False) or DEFAULT_OLLAMA_URL
         logger.info(f"Initializing Ollama client with host: {ollama_url}")
         self.client = Client(host=ollama_url)
 
@@ -95,13 +103,13 @@ class OllamaProvider(LLMProvider):
         messages.append(user_msg)
 
         last_exception = None
-        max_retries = kwargs.get('max_retries', 3)
+        max_retries = kwargs.get('max_retries', DEFAULT_MAX_RETRIES)
         pull_attempted = False
         
         format_param = None
         response_mime_type = kwargs.get('response_mime_type', getattr(module, 'response_mime_type', self.response_mime_type))
         if structure or response_mime_type == "application/json":
-            format_param = 'json'
+            format_param = DEFAULT_FORMAT_JSON
 
         if stream and structure:
             logger.warning("Streaming is not supported with structured output in Ollama. Disabling streaming.")
@@ -203,7 +211,7 @@ class OllamaProvider(LLMProvider):
                     except Exception as e:
                         logger.warning(f"Failed to parse Ollama JSON response: {e}")
                         if attempt < max_retries - 1:
-                            time.sleep(2)
+                            time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                             continue
                 
                 return build_result(output_content, reasoning, return_reasoning)
@@ -226,13 +234,13 @@ class OllamaProvider(LLMProvider):
                         ) from pull_error
                 else:
                     logger.warning(f"Ollama response failed on attempt {attempt + 1} for model {model}: {e}")
-                    time.sleep(2)
+                    time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                     continue
 
             except Exception as e:
                 last_exception = e
                 logger.warning(f"Ollama response failed on attempt {attempt + 1} for model {model}: {e}")
-                time.sleep(2)
+                time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                 continue
         
         raise RuntimeError(f"Failed to get response from Ollama after {max_retries} attempts.") from last_exception
