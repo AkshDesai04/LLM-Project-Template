@@ -8,6 +8,13 @@ from .model_names import strip_provider_prefix
 
 logger = get_logger("CostTracker")
 
+# Top-level Constants
+HIGH_CONTEXT_TIER_THRESHOLD = 200_000
+TOKENS_PER_MILLION = 1_000_000
+DEFAULT_TABLE_WIDTH = 168
+PRICING_CSV_RELATIVE_PATH = os.path.join("assets", "model_pricing.csv")
+
+
 class CostTracker:
     _instance = None
     _exit_handler_registered = False
@@ -41,7 +48,7 @@ class CostTracker:
         pricing_data = {}
         # Resolve the root relative to this file
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        csv_path = os.path.join(project_root, "assets", "model_pricing.csv")
+        csv_path = os.path.join(project_root, PRICING_CSV_RELATIVE_PATH)
 
         try:
             rows = read_csv(csv_path)
@@ -70,7 +77,7 @@ class CostTracker:
                     "api_type": (row.get('api_type') or '').strip(),
                 }
         except Exception as e:
-            logger.error(f"Failed to load pricing from {csv_path}: {e}")
+            logger.error(f"Failed to load pricing from {csv_path}: {e}. Defaulting to empty pricing table ($0.00 reporting).")
         return pricing_data
 
     def get_model_api_type(self, model_name: str) -> Optional[str]:
@@ -96,7 +103,7 @@ class CostTracker:
             )
             return {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
 
-        tier_threshold = 200_000
+        tier_threshold = HIGH_CONTEXT_TIER_THRESHOLD
 
         # Input Cost
         input_cost = 0.0
@@ -105,11 +112,11 @@ class CostTracker:
             rate_input_above = rates.get("input_above_200k", 0.0)
 
             if rate_input_above > 0 and prompt_tokens > tier_threshold:
-                cost_below = (tier_threshold / 1_000_000) * rate_input
-                cost_above = ((prompt_tokens - tier_threshold) / 1_000_000) * rate_input_above
+                cost_below = (tier_threshold / TOKENS_PER_MILLION) * rate_input
+                cost_above = ((prompt_tokens - tier_threshold) / TOKENS_PER_MILLION) * rate_input_above
                 input_cost = cost_below + cost_above
             else:
-                input_cost = (prompt_tokens / 1_000_000) * rate_input
+                input_cost = (prompt_tokens / TOKENS_PER_MILLION) * rate_input
 
         # Output Cost
         output_cost = 0.0
@@ -118,14 +125,14 @@ class CostTracker:
             rate_output_above = rates.get("output_above_200k", 0.0)
 
             if rate_output_above > 0 and output_tokens > tier_threshold:
-                cost_below = (tier_threshold / 1_000_000) * rate_output
-                cost_above = ((output_tokens - tier_threshold) / 1_000_000) * rate_output_above
+                cost_below = (tier_threshold / TOKENS_PER_MILLION) * rate_output
+                cost_above = ((output_tokens - tier_threshold) / TOKENS_PER_MILLION) * rate_output_above
                 output_cost = cost_below + cost_above
             else:
-                output_cost = (output_tokens / 1_000_000) * rate_output
+                output_cost = (output_tokens / TOKENS_PER_MILLION) * rate_output
 
         # Cached Cost
-        cached_cost = (cached_tokens / 1_000_000) * rates.get("cached", 0.0)
+        cached_cost = (cached_tokens / TOKENS_PER_MILLION) * rates.get("cached", 0.0)
 
         return {
             "input_cost": input_cost,
@@ -197,7 +204,7 @@ class CostTracker:
 
         self._summary_printed = True
 
-        table_width = 168
+        table_width = DEFAULT_TABLE_WIDTH
         print("\n" + "=" * table_width)
         print("ITEMIZED TRANSACTION PRICING SUMMARY (NEW ARCHITECTURE)")
         print("=" * table_width)
