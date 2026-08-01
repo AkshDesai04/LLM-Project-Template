@@ -48,6 +48,7 @@ class SQLiteConnector(BaseDatabaseConnector):
         self.db_path = resolved_path
         self.timeout = timeout
         self._connection: Optional[sqlite3.Connection] = None
+        self._in_transaction: bool = False
 
     def connect(self) -> sqlite3.Connection:
         """
@@ -128,10 +129,12 @@ class SQLiteConnector(BaseDatabaseConnector):
         try:
             cursor = conn.cursor()
             cursor.execute(query, params)
-            conn.commit()
+            if not self._in_transaction:
+                conn.commit()
             return cursor.rowcount
         except sqlite3.Error as e:
-            conn.rollback()
+            if not self._in_transaction:
+                conn.rollback()
             logger.error(f"Failed to execute SQLite non-query: {e}")
             raise
 
@@ -152,10 +155,12 @@ class SQLiteConnector(BaseDatabaseConnector):
         try:
             cursor = conn.cursor()
             cursor.executemany(query, params_list)
-            conn.commit()
+            if not self._in_transaction:
+                conn.commit()
             return cursor.rowcount
         except sqlite3.Error as e:
-            conn.rollback()
+            if not self._in_transaction:
+                conn.rollback()
             logger.error(f"Failed to execute SQLite executemany: {e}")
             raise
 
@@ -189,10 +194,15 @@ class SQLiteConnector(BaseDatabaseConnector):
         Context manager for SQLite transaction safety.
         """
         conn = self.connect()
+        was_in_transaction = self._in_transaction
+        self._in_transaction = True
         try:
             yield conn
-            conn.commit()
+            if not was_in_transaction:
+                conn.commit()
         except Exception as e:
             conn.rollback()
             logger.error(f"SQLite transaction failed and rolled back: {e}")
             raise
+        finally:
+            self._in_transaction = was_in_transaction

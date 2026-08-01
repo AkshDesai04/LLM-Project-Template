@@ -59,6 +59,7 @@ class OracleDBConnector(BaseDatabaseConnector):
             self.dsn = f"{self.host}:{self.port}/{self.service_name}"
 
         self._connection = None
+        self._in_transaction: bool = False
 
     def connect(self):
         """
@@ -136,10 +137,12 @@ class OracleDBConnector(BaseDatabaseConnector):
             with conn.cursor() as cursor:
                 cursor.execute(query, params)
                 rowcount = cursor.rowcount
-            conn.commit()
+            if not self._in_transaction:
+                conn.commit()
             return rowcount
         except Exception as e:
-            conn.rollback()
+            if not self._in_transaction:
+                conn.rollback()
             logger.error(f"OracleDB non-query execution failed: {e}")
             raise
 
@@ -154,10 +157,12 @@ class OracleDBConnector(BaseDatabaseConnector):
             with conn.cursor() as cursor:
                 cursor.executemany(query, params_list)
                 rowcount = cursor.rowcount
-            conn.commit()
+            if not self._in_transaction:
+                conn.commit()
             return rowcount
         except Exception as e:
-            conn.rollback()
+            if not self._in_transaction:
+                conn.rollback()
             logger.error(f"OracleDB executemany failed: {e}")
             raise
 
@@ -187,10 +192,15 @@ class OracleDBConnector(BaseDatabaseConnector):
         Context manager for OracleDB transaction safety.
         """
         conn = self.connect()
+        was_in_transaction = self._in_transaction
+        self._in_transaction = True
         try:
             yield conn
-            conn.commit()
+            if not was_in_transaction:
+                conn.commit()
         except Exception as e:
             conn.rollback()
             logger.error(f"OracleDB transaction failed and rolled back: {e}")
             raise
+        finally:
+            self._in_transaction = was_in_transaction

@@ -58,6 +58,7 @@ class PostgreSQLConnector(BaseDatabaseConnector):
         self.dbname = dbname or get_secret("POSTGRES_DB", raise_error=False)
         self.sslmode = sslmode or get_secret("POSTGRES_SSLMODE", raise_error=False) or "prefer"
         self._connection = None
+        self._in_transaction: bool = False
 
     def connect(self):
         """
@@ -142,10 +143,12 @@ class PostgreSQLConnector(BaseDatabaseConnector):
             with conn.cursor() as cursor:
                 cursor.execute(query, params)
                 rowcount = cursor.rowcount
-            conn.commit()
+            if not self._in_transaction:
+                conn.commit()
             return rowcount
         except Exception as e:
-            conn.rollback()
+            if not self._in_transaction:
+                conn.rollback()
             logger.error(f"PostgreSQL non-query execution failed: {e}")
             raise
 
@@ -160,10 +163,12 @@ class PostgreSQLConnector(BaseDatabaseConnector):
             with conn.cursor() as cursor:
                 cursor.executemany(query, params_list)
                 rowcount = cursor.rowcount
-            conn.commit()
+            if not self._in_transaction:
+                conn.commit()
             return rowcount
         except Exception as e:
-            conn.rollback()
+            if not self._in_transaction:
+                conn.rollback()
             logger.error(f"PostgreSQL executemany failed: {e}")
             raise
 
@@ -190,10 +195,15 @@ class PostgreSQLConnector(BaseDatabaseConnector):
         Context manager for PostgreSQL transaction management.
         """
         conn = self.connect()
+        was_in_transaction = self._in_transaction
+        self._in_transaction = True
         try:
             yield conn
-            conn.commit()
+            if not was_in_transaction:
+                conn.commit()
         except Exception as e:
             conn.rollback()
             logger.error(f"PostgreSQL transaction failed and rolled back: {e}")
             raise
+        finally:
+            self._in_transaction = was_in_transaction

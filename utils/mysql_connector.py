@@ -56,6 +56,7 @@ class MySQLConnector(BaseDatabaseConnector):
         self.database = database or get_secret("MYSQL_DB", raise_error=False)
         self.charset = charset
         self._connection = None
+        self._in_transaction: bool = False
 
     def connect(self):
         """
@@ -137,10 +138,12 @@ class MySQLConnector(BaseDatabaseConnector):
         try:
             with conn.cursor() as cursor:
                 rowcount = cursor.execute(query, params)
-            conn.commit()
+            if not self._in_transaction:
+                conn.commit()
             return rowcount
         except Exception as e:
-            conn.rollback()
+            if not self._in_transaction:
+                conn.rollback()
             logger.error(f"MySQL non-query execution failed: {e}")
             raise
 
@@ -154,10 +157,12 @@ class MySQLConnector(BaseDatabaseConnector):
         try:
             with conn.cursor() as cursor:
                 rowcount = cursor.executemany(query, params_list)
-            conn.commit()
+            if not self._in_transaction:
+                conn.commit()
             return rowcount
         except Exception as e:
-            conn.rollback()
+            if not self._in_transaction:
+                conn.rollback()
             logger.error(f"MySQL executemany failed: {e}")
             raise
 
@@ -184,10 +189,15 @@ class MySQLConnector(BaseDatabaseConnector):
         Context manager for MySQL transaction safety.
         """
         conn = self.connect()
+        was_in_transaction = self._in_transaction
+        self._in_transaction = True
         try:
             yield conn
-            conn.commit()
+            if not was_in_transaction:
+                conn.commit()
         except Exception as e:
             conn.rollback()
             logger.error(f"MySQL transaction failed and rolled back: {e}")
             raise
+        finally:
+            self._in_transaction = was_in_transaction
