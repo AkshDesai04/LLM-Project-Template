@@ -43,6 +43,7 @@ class AnthropicProvider(LLMProvider):
         super().__init__(api_key, base)
         self.client = Anthropic(api_key=api_key)
 
+    # TODO: Replace tool-use workaround with native response_format schema when supported by Anthropic Messages API.
     @staticmethod
     def _build_structured_tool(structure: Any) -> Optional[dict]:
         """

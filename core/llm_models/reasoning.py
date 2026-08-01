@@ -14,8 +14,7 @@ answered. reasoning is None when the model did not produce one.
 import re
 from typing import Any, Iterable, Optional, Tuple
 
-# deepseek-r1, the Qwen reasoning models and Perplexity's sonar-reasoning inline
-# their thoughts in the content rather than exposing a separate field.
+# TODO: Standardize thought extraction once all target model backends provide native reasoning API fields.
 THINK_TAG_PATTERN = re.compile(
     r"<(think|thinking|reasoning)>(.*?)</\1>",
     re.DOTALL | re.IGNORECASE,
