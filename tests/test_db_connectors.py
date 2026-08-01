@@ -1,12 +1,13 @@
 """
-Unit tests for Database Connector Utilities.
+Unit tests for Database Connector Utilities & DatabaseRouter.
 
 Verifies exports, SQLite functional operations, context managers,
-fallback behavior for optional database drivers, and BaseDatabaseConnector inheritance.
+DatabaseRouter factory routing, fallback behavior for optional drivers, and BaseDatabaseConnector inheritance.
 """
 
 from utils import (
     BaseDatabaseConnector,
+    DatabaseRouter,
     MongoDBConnector,
     MySQLConnector,
     OracleDBConnector,
@@ -139,6 +140,30 @@ def test_oracle_initialization():
     assert connector.is_connected() is False
 
 
+def test_database_router():
+    """Verify DatabaseRouter resolves connectors dynamically by name and URI scheme."""
+    # SQLite routing
+    sqlite_conn = DatabaseRouter.get_connector("sqlite", db_path=":memory:")
+    assert isinstance(sqlite_conn, SQLiteConnector)
+
+    # Postgres routing
+    pg_conn = DatabaseRouter.get_connector("postgresql://user:pass@localhost:5432/db")
+    assert isinstance(pg_conn, PostgreSQLConnector)
+    assert pg_conn.connection_string == "postgresql://user:pass@localhost:5432/db"
+
+    # MySQL routing
+    mysql_conn = DatabaseRouter.get_connector("mysql")
+    assert isinstance(mysql_conn, MySQLConnector)
+
+    # MongoDB routing
+    mongo_conn = DatabaseRouter.get_connector("mongodb://localhost:27017")
+    assert isinstance(mongo_conn, MongoDBConnector)
+
+    # Oracle routing
+    oracle_conn = DatabaseRouter.get_connector("oracle")
+    assert isinstance(oracle_conn, OracleDBConnector)
+
+
 if __name__ == "__main__":
     test_exports()
     test_sqlite_functional()
@@ -146,4 +171,5 @@ if __name__ == "__main__":
     test_mysql_initialization()
     test_mongo_initialization()
     test_oracle_initialization()
-    print("All database connector tests passed successfully!")
+    test_database_router()
+    print("All database connector and router tests passed successfully!")

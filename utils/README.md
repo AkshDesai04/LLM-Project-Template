@@ -14,13 +14,14 @@ belongs in `core/` instead.
 | `parallel_executor.py` | Thread-pool fan-out with retries and rate limiting | `ParallelExecutor` |
 | `markitdown_utils.py` | Document/URL/media → Markdown via MarkItDown | `MarkItDownUtils` |
 | `base_connector.py` | Abstract Base Class interface for database connectors | `BaseDatabaseConnector` |
+| `db_router.py` | Unified router/factory for resolving database connectors | `DatabaseRouter` |
 | `sqlite_connector.py` | SQLite3 database connector (std library) | `SQLiteConnector` |
 | `postgres_connector.py` | PostgreSQL database connector (psycopg2) | `PostgreSQLConnector` |
 | `mysql_connector.py` | MySQL database connector (pymysql) | `MySQLConnector` |
 | `mongo_connector.py` | MongoDB document connector (pymongo) | `MongoDBConnector` |
 | `oracle_connector.py` | OracleDB database connector (oracledb) | `OracleDBConnector` |
 
-Import directly from `utils` or concrete modules: `from utils import SQLiteConnector, PostgreSQLConnector`.
+Import directly from `utils`: `from utils import DatabaseRouter, SQLiteConnector, PostgreSQLConnector`.
 
 The dependency graph is a star. `logger.py` imports nothing local; the other four import
 only `utils.logger`. None of them import each other, so they can be used independently.
@@ -237,6 +238,11 @@ Abstract base class standardizing database interaction methods across all connec
 - `fetch_one(query, params=None)` -> `dict | None`
 - `transaction()` -> Context manager for auto-commit/rollback
 - Context manager (`with Connector() as db:`) for automatic session cleanup
+
+### `DatabaseRouter` (`utils/db_router.py`)
+Unified factory and router for instantiating database connectors dynamically based on dialect name, alias, or connection URI.
+- Secret resolution: Connectors fetch credentials via `utils.env_ops.get_secret()` matching `KEY_LOCATION` (`LOCAL` or `AWS_SM`).
+- Dialect resolution: `DatabaseRouter.get_connector('postgres')`, `DatabaseRouter.get_connector('postgresql://user:pass@localhost/db')`, `DatabaseRouter.get_connector('sqlite')`, etc.
 
 ### `SQLiteConnector` (`utils/sqlite_connector.py`)
 Lightweight local relational database connector leveraging standard library `sqlite3`.
