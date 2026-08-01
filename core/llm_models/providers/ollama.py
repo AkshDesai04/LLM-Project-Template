@@ -227,6 +227,7 @@ class OllamaProvider(LLMProvider):
                 else:
                     logger.warning(f"Ollama response failed on attempt {attempt + 1} for model {model}: {e}")
                     time.sleep(2)
+                    continue
 
             except Exception as e:
                 last_exception = e
