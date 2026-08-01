@@ -32,12 +32,7 @@ This is the internal lingua franca. OpenAI, Perplexity and vLLM consume it direc
 ### `extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str`
 
 Extracts text with `PyPDF2.PdfReader`, concatenating every page separated by newlines,
-and returns the stripped result.
-
-**Never raises.** On failure it logs the error and returns the string
-`"[Error extracting text from PDF: {e}]"`. That placeholder is then sent to the model as
-if it were document content, so a scanned or image-only PDF fails quietly rather than
-loudly — check for the marker if that matters to you. There is no OCR here.
+and returns the stripped result. On failure, it logs the error and raises `RuntimeError`.
 
 ### `process_video_frames(video_bytes: bytes, frames_per_second: int = 1) -> List[dict]`
 
@@ -50,8 +45,8 @@ released in a `finally` block, so both are cleaned up even on error.
 
 Notes and caveats:
 
-- Size cap is **512 MB** (`MAX_FILE_SIZE = 512 * 1024 * 1024`). Exceeding it raises
-  `ValueError` — though the message text says "50MB", which does not match the constant.
+- Size cap is **512 MB** (`MAX_VIDEO_FILE_SIZE = 512 * 1024 * 1024`). Exceeding it raises
+  `ValueError` stating the 512MB limit.
 - If OpenCV cannot detect the frame rate it assumes **30 fps**.
 - Unreadable frames are skipped silently.
 - At the default 1 fps a ten-minute video yields ~600 images. Nothing here caps the
