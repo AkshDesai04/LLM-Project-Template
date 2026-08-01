@@ -164,35 +164,43 @@ class GeminiProvider(LLMProvider):
                     response_stream = self.client.models.generate_content_stream(model=model, contents=contents, config=config)
                     
                     def stream_wrapper():
-                        for chunk in response_stream:
-                            if chunk.usage_metadata:
-                                u = chunk.usage_metadata
-                                def get_val(obj, attr): return getattr(obj, attr, 0) or 0
-                                
-                                prompt_tokens = get_val(u, 'prompt_token_count')
-                                candidate_tokens = get_val(u, 'candidates_token_count')
-                                cached_tokens = get_val(u, 'cached_content_token_count')
+                        last_prompt_tokens = 0
+                        last_candidate_tokens = 0
+                        last_cached_tokens = 0
+                        cost_recorded = False
 
+                        try:
+                            for chunk in response_stream:
+                                if chunk.usage_metadata:
+                                    u = chunk.usage_metadata
+                                    def get_val(obj, attr): return getattr(obj, attr, 0) or 0
+                                    
+                                    last_prompt_tokens = get_val(u, 'prompt_token_count')
+                                    last_candidate_tokens = get_val(u, 'candidates_token_count')
+                                    last_cached_tokens = get_val(u, 'cached_content_token_count')
+
+                                if return_reasoning:
+                                    chunk_reasoning, chunk_text = self._split_thought_parts(
+                                        getattr(chunk, 'candidates', None)
+                                    )
+                                    yield [chunk_text, chunk_reasoning]
+                                else:
+                                    yield chunk
+                        finally:
+                            if not cost_recorded:
                                 total_duration = time.time() - start_time
-                                costs = cost_tracker.calculate_cost(model, prompt_tokens, candidate_tokens, cached_tokens)
+                                costs = cost_tracker.calculate_cost(model, last_prompt_tokens, last_candidate_tokens, last_cached_tokens)
                                 cost_tracker.record_transaction(
                                     type(module).__name__,
                                     model,
                                     costs,
                                     total_duration,
-                                    input_tokens=prompt_tokens,
-                                    output_tokens=candidate_tokens,
-                                    cached_tokens=cached_tokens,
+                                    input_tokens=last_prompt_tokens,
+                                    output_tokens=last_candidate_tokens,
+                                    cached_tokens=last_cached_tokens,
                                 )
+                                cost_recorded = True
                                 logger.info(f"Gemini Stream Transaction Recorded: ${costs['total_cost']:.6f} total cost")
-
-                            if return_reasoning:
-                                chunk_reasoning, chunk_text = self._split_thought_parts(
-                                    getattr(chunk, 'candidates', None)
-                                )
-                                yield [chunk_text, chunk_reasoning]
-                            else:
-                                yield chunk
                     return stream_wrapper()
 
                 response = self.client.models.generate_content(model=model, contents=contents, config=config)
