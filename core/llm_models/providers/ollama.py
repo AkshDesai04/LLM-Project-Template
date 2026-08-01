@@ -219,9 +219,11 @@ class OllamaProvider(LLMProvider):
                         logger.info(f"Successfully pulled model '{model}'. Retrying generation...")
                         continue
                     except Exception as pull_error:
-                        logger.error(f"Failed to pull model '{model}': {pull_error}")
-                        last_exception = pull_error
-                        break
+                        logger.error(f"Failed to pull model '{model}' from Ollama Hub: {pull_error}")
+                        raise RuntimeError(
+                            f"Model '{model}' is not installed locally and could not be found or pulled from Ollama Hub. "
+                            f"Ensure the model name is correct. Error: {pull_error}"
+                        ) from pull_error
                 else:
                     logger.warning(f"Ollama response failed on attempt {attempt + 1} for model {model}: {e}")
                     time.sleep(2)
