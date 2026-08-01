@@ -3,20 +3,20 @@ Database Router & Factory.
 
 Provides a unified factory entry point (DatabaseRouter) for instantiating
 database connectors by name, dialect, or single connection string URL.
-All connector credentials seamlessly resolve via utils.env_ops (honouring KEY_LOCATION
+All connector credentials seamlessly resolve via utils.env (honouring KEY_LOCATION
 to fetch credentials from .env or AWS Secrets Manager).
 """
 
 from typing import Any, Dict, Optional
 
-from utils.base_connector import BaseDatabaseConnector
-from utils.env_ops import get_database_url
-from utils.logger import get_logger
-from utils.mongo_connector import MongoDBConnector
-from utils.mysql_connector import MySQLConnector
-from utils.oracle_connector import OracleDBConnector
-from utils.postgres_connector import PostgreSQLConnector
-from utils.sqlite_connector import SQLiteConnector
+from .base import BaseDatabaseConnector
+from .mongo import MongoDBConnector
+from .mysql import MySQLConnector
+from .oracle import OracleDBConnector
+from .postgres import PostgreSQLConnector
+from .sqlite import SQLiteConnector
+from utils.env import get_database_url
+from utils.logging import get_logger
 
 logger = get_logger("DatabaseRouter")
 
@@ -47,7 +47,7 @@ class DatabaseRouter:
     Unified router and factory for Database Connectors.
 
     Supports building connectors based on explicit dialect name, alias,
-    or connection URI scheme while fetching secrets through utils.env_ops.
+    or connection URI scheme while fetching secrets through utils.env.
     """
 
     @staticmethod

@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 import contextlib
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from utils.logger import get_logger
+from utils.logging import get_logger
 
 logger = get_logger("BaseDatabaseConnector")
 

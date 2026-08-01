@@ -1,7 +1,7 @@
 import os
 import csv
 from typing import List, Dict
-from utils.logger import get_logger
+from utils.logging import get_logger
 
 logger = get_logger("FileOps")
 
@@ -40,7 +40,7 @@ def get_file(file_path: str) -> bytes:
 
 
 def read_prompt(prompt_title: str) -> str:
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     prompt_path = os.path.join(base_dir, PROMPTS_DIR_NAME, f"{prompt_title}{PROMPT_FILE_EXTENSION}")
     return read_file(prompt_path)
 

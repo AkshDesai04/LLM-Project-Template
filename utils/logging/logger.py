@@ -7,8 +7,8 @@ from typing import Optional, Union
 
 from dotenv import load_dotenv
 
-# This module is imported by utils.env_ops, so it must read its own
-# configuration straight from the environment to avoid a circular import.
+# This module reads its configuration straight from the environment
+# to avoid circular imports.
 
 LOGGING_MODE_NAME = "LOGGING_MODE"
 LOGGING_LEVEL_NAME = "LOGGING_LEVEL"
@@ -192,7 +192,7 @@ def get_logger(name: str, level: Optional[int] = None) -> Union[logging.Logger, 
         # File Handler (JSON format)
         try:
             # Modified path to be relative to root
-            log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", LOG_DIR_NAME))
+            log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", LOG_DIR_NAME))
             os.makedirs(log_dir, exist_ok=True)
 
             date_str = datetime.now().strftime(LOG_FILE_DATE_FORMAT)

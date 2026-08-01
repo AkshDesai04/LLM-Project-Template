@@ -10,15 +10,16 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import unquote, urlparse
 
 try:
+    import oracle_db
     import oracledb
     ORACLEDB_AVAILABLE = True
 except ImportError:
     ORACLEDB_AVAILABLE = False
     oracledb = None
 
-from utils.base_connector import BaseDatabaseConnector
-from utils.env_ops import get_database_url, get_secret
-from utils.logger import get_logger
+from .base import BaseDatabaseConnector
+from utils.env import get_database_url, get_secret
+from utils.logging import get_logger
 
 logger = get_logger("OracleDBConnector")
 
