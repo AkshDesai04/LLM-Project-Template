@@ -24,6 +24,15 @@ from core.modules.base import Base as BaseModule
 
 logger = get_logger("GeminiProvider")
 
+# Top-level Constants
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_RETRY_SLEEP_SECONDS: float = 2.0
+DEFAULT_EMBED_TASK_TYPE: str = "RETRIEVAL_DOCUMENT"
+DEFAULT_EMBED_DIMENSIONS: int = 1536
+FILE_PROCESSING_POLL_INTERVAL: float = 2.0
+VERTEX_SENTINEL_KEY: str = "vertex-service-account"
+
+
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: Optional[str], base: BaseModule):
         key_type = get_gemini_key_type()
@@ -35,7 +44,7 @@ class GeminiProvider(LLMProvider):
         if key_type == GEMINI_KEY_TYPE_API_KEY:
             resolved_key = api_key or get_secret(GEMINI_API_KEY_NAME)
         else:
-            resolved_key = api_key or "vertex-service-account"
+            resolved_key = api_key or VERTEX_SENTINEL_KEY
 
         super().__init__(resolved_key, base)
         self.client = self._build_client(api_key)
@@ -122,7 +131,7 @@ class GeminiProvider(LLMProvider):
                 contents.append(uploaded_file)
 
         last_exception = None
-        max_retries = kwargs.get('max_retries', 3)
+        max_retries = kwargs.get('max_retries', DEFAULT_MAX_RETRIES)
 
         logger.info(f"Attempting generation with model: {model}")
         for attempt in range(max_retries):
@@ -249,7 +258,7 @@ class GeminiProvider(LLMProvider):
             except Exception as e:
                 last_exception = e
                 logger.warning(f"Gemini response failed on attempt {attempt + 1} for model {model}: {e}")
-                time.sleep(2)
+                time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
                 continue
 
         raise RuntimeError(
@@ -278,7 +287,7 @@ class GeminiProvider(LLMProvider):
 
             while uploaded_file.state.name == "PROCESSING":
                 logger.info(f"File {uploaded_file.name} is still processing...")
-                time.sleep(2)
+                time.sleep(FILE_PROCESSING_POLL_INTERVAL)
                 uploaded_file = self.client.files.get(name=uploaded_file.name)
 
             if uploaded_file.state.name == "FAILED":
@@ -289,7 +298,7 @@ class GeminiProvider(LLMProvider):
             logger.error(f"Gemini upload failed: {e}")
             raise RuntimeError(f"Failed to upload {mime_type} to Gemini: {e}")
 
-    def embed_content(self, text: Union[str, List[str]], task_type: str = "RETRIEVAL_DOCUMENT", model: Optional[str] = None, dimensions=1536, **kwargs) -> Union[List[float], List[List[float]]]:
+    def embed_content(self, text: Union[str, List[str]], task_type: str = DEFAULT_EMBED_TASK_TYPE, model: Optional[str] = None, dimensions: int = DEFAULT_EMBED_DIMENSIONS, **kwargs) -> Union[List[float], List[List[float]]]:
         try:
             model = model or self.model_name
             input_texts = [text] if isinstance(text, str) else text
