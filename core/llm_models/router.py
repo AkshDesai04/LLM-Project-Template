@@ -9,9 +9,18 @@ from .model_names import PROVIDER_ALIASES, split_model_name
 
 logger = get_logger("ModelRouter")
 
+# Top-level Constants
+PROVIDER_GOOGLE = "google"
+PROVIDER_OPENAI = "openai"
+PROVIDER_ANTHROPIC = "anthropic"
+PROVIDER_PERPLEXITY = "perplexity"
+PROVIDER_OLLAMA = "ollama"
+PROVIDER_VLLM = "vllm"
+DEFAULT_FALLBACK_INDEX = 0
+
 
 class ModelRouter:
-    def __init__(self, module: BaseModule, fallback_index: int = 0):
+    def __init__(self, module: BaseModule, fallback_index: int = DEFAULT_FALLBACK_INDEX):
         model = getattr(module, 'model', None)
         models = getattr(module, 'models', None)
 
@@ -23,7 +32,7 @@ class ModelRouter:
             raise ValueError("Module must specify at least 'model' or 'models'.")
 
         if fallback_index < 0 or fallback_index >= len(chain):
-            raise ValueError(f"Fallback index {fallback_index} is out of range.")
+            raise ValueError(f"Fallback index {fallback_index} is out of range for chain of length {len(chain)}.")
 
         self._model_chain = chain[fallback_index:]
         self._original_module = module
@@ -50,36 +59,40 @@ class ModelRouter:
         """Constructs the correct LLMProvider for a given model name."""
         provider = self.get_provider_by_model_name(model_name)
 
-        model_name = self.strip_routing_prefix(model_name)
-        module_for_init = module.model_copy(update={'model': model_name})
+        stripped_model_name = self.strip_routing_prefix(model_name)
+        module_for_init = module.model_copy(update={'model': stripped_model_name})
 
-        logger.info(f"Routing to provider: {provider} for model '{model_name}'")
+        logger.info(f"Routing to provider: '{provider}' for model '{stripped_model_name}'")
 
-        if provider == 'google':
-            from .providers.gemini import GeminiProvider
-            return GeminiProvider(None, LLMProvider.prepare_module(module_for_init))
+        try:
+            if provider == PROVIDER_GOOGLE:
+                from .providers.gemini import GeminiProvider
+                return GeminiProvider(None, LLMProvider.prepare_module(module_for_init))
 
-        if provider == 'openai':
-            from .providers.openai import OpenAIProvider
-            return OpenAIProvider(None, LLMProvider.prepare_module(module_for_init))
+            if provider == PROVIDER_OPENAI:
+                from .providers.openai import OpenAIProvider
+                return OpenAIProvider(None, LLMProvider.prepare_module(module_for_init))
 
-        if provider == 'anthropic':
-            from .providers.anthropic import AnthropicProvider
-            return AnthropicProvider(None, LLMProvider.prepare_module(module_for_init))
+            if provider == PROVIDER_ANTHROPIC:
+                from .providers.anthropic import AnthropicProvider
+                return AnthropicProvider(None, LLMProvider.prepare_module(module_for_init))
 
-        if provider == 'perplexity':
-            from .providers.perplexity import PerplexityProvider
-            return PerplexityProvider(None, LLMProvider.prepare_module(module_for_init))
+            if provider == PROVIDER_PERPLEXITY:
+                from .providers.perplexity import PerplexityProvider
+                return PerplexityProvider(None, LLMProvider.prepare_module(module_for_init))
 
-        if provider == 'ollama':
-            from .providers.ollama import OllamaProvider
-            return OllamaProvider(None, LLMProvider.prepare_module(module_for_init))
+            if provider == PROVIDER_OLLAMA:
+                from .providers.ollama import OllamaProvider
+                return OllamaProvider(None, LLMProvider.prepare_module(module_for_init))
 
-        if provider == 'vllm':
-            from .providers.vllm import VLLMProvider
-            return VLLMProvider(None, LLMProvider.prepare_module(module_for_init))
+            if provider == PROVIDER_VLLM:
+                from .providers.vllm import VLLMProvider
+                return VLLMProvider(None, LLMProvider.prepare_module(module_for_init))
 
-        raise ValueError(f"Unsupported provider: '{provider}'")
+            raise ValueError(f"Unsupported provider: '{provider}' for model '{model_name}'.")
+        except Exception as e:
+            logger.error(f"Failed to build provider '{provider}' for model '{model_name}': {e}")
+            raise
 
     @staticmethod
     def get_provider_by_model_name(model_name: str) -> str:
@@ -94,27 +107,21 @@ class ModelRouter:
     def _infer_provider_from_bare_name(model_name: str) -> str:
         """
         Guesses the provider for a name written without a prefix.
-
-        Kept so existing module configs keep working, but it cannot recognise a
-        model family it has never heard of, which is exactly what the explicit
-        prefix solves.
         """
         model_name_lower = model_name.lower()
 
         if model_name_lower.startswith(("gpt", "o1", "o3", "o4")):
-            provider = "openai"
+            provider = PROVIDER_OPENAI
         elif model_name_lower.startswith("gemini"):
-            provider = "google"
+            provider = PROVIDER_GOOGLE
         elif model_name_lower.startswith(("claude", "anthropic")):
-            provider = "anthropic"
+            provider = PROVIDER_ANTHROPIC
         elif model_name_lower.startswith(("sonar", "perplexity")):
-            provider = "perplexity"
+            provider = PROVIDER_PERPLEXITY
         elif model_name_lower.startswith(("mistral", "phi", "qwen")):
-            provider = "ollama"
+            provider = PROVIDER_OLLAMA
         elif model_name_lower.startswith("llama"):
-            # Ambiguous between Perplexity and Ollama; kept on Perplexity for
-            # backward compatibility.
-            provider = "perplexity"
+            provider = PROVIDER_PERPLEXITY
         else:
             raise ValueError(
                 f"Could not determine provider for model '{model_name}'. "
@@ -166,12 +173,18 @@ class ModelRouter:
                 continue
 
         raise RuntimeError(
-            f"Failed to get response after trying all models in chain: {self._model_chain}"
+            f"Failed to get response after trying all models in chain {self._model_chain}. "
+            f"Last model error: {last_exception}"
         ) from last_exception
 
     def _require_model_instance(self) -> LLMProvider:
         if self.model_instance is None:
-            self.model_instance = self._build_provider(self._model_chain[0], self._original_module)
+            try:
+                self.model_instance = self._build_provider(self._model_chain[0], self._original_module)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Could not initialize primary model provider for '{self._model_chain[0]}': {e}"
+                ) from e
         return self.model_instance
 
     def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:
