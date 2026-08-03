@@ -45,7 +45,10 @@ class SQLiteConnector(BaseDatabaseConnector):
     def connect(self) -> sqlite3.Connection:
         if self._connection is None:
             logger.info(f"Connecting to SQLite database at '{self.db_path}'...")
-            self._connection = sqlite3.connect(self.db_path, timeout=self.timeout)
+            if self.db_path == ":memory:":
+                self._connection = sqlite3.connect("file::memory:?cache=shared", uri=True, timeout=self.timeout)
+            else:
+                self._connection = sqlite3.connect(self.db_path, timeout=self.timeout)
             self._connection.row_factory = sqlite3.Row
             logger.info("Successfully connected to SQLite database.")
         return self._connection

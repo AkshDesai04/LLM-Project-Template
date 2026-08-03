@@ -52,7 +52,9 @@ def execute_sql_many(connection: Any, query: str, params_list: List[Union[Tuple[
     try:
         if hasattr(cursor, 'executemany'):
             cursor.executemany(query, params_list)
-            total = getattr(cursor, 'rowcount', len(params_list))
+            total = getattr(cursor, 'rowcount', -1)
+            if total < 0:
+                total = len(params_list)
         else:
             total = 0
             for params in params_list:
