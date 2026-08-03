@@ -14,6 +14,13 @@ except ImportError:
     psycopg2 = None
 
 from utils.db.base import BaseDatabaseConnector
+from utils.db.postgres.vector_handler import (
+    create_postgres_vector_table,
+    insert_postgres_vector,
+    insert_postgres_vectors,
+    search_postgres_vectors,
+    delete_postgres_vector,
+)
 from utils.env import get_database_url, get_secret
 from utils.logging import get_logger
 
@@ -129,3 +136,19 @@ class PostgreSQLConnector(BaseDatabaseConnector):
             raise
         finally:
             self._in_transaction = was_in_transaction
+
+    # Vector operations
+    def create_vector_table(self, table_name: str, vector_dim: int, distance_metric: str = "cosine") -> None:
+        create_postgres_vector_table(self, table_name, vector_dim, distance_metric)
+
+    def insert_vector(self, table_name: str, vector_id: str, vector: List[float], metadata: Optional[Dict[str, Any]] = None) -> int:
+        return insert_postgres_vector(self, table_name, vector_id, vector, metadata)
+
+    def insert_vectors(self, table_name: str, records: List[Dict[str, Any]]) -> int:
+        return insert_postgres_vectors(self, table_name, records)
+
+    def vector_search(self, table_name: str, query_vector: List[float], top_k: int = 10, min_score: Optional[float] = None, distance_metric: str = "cosine") -> List[Dict[str, Any]]:
+        return search_postgres_vectors(self, table_name, query_vector, top_k=top_k, min_score=min_score, distance_metric=distance_metric)
+
+    def delete_vector(self, table_name: str, vector_id: str) -> int:
+        return delete_postgres_vector(self, table_name, vector_id)

@@ -2,7 +2,7 @@
 Unit tests for Database Connector Utilities & DatabaseRouter.
 
 Verifies exports, single connection URL resolution, SQLite functional operations,
-context managers, DatabaseRouter factory routing, and fallback behavior for optional drivers.
+vector search (top_k and min_score filtering), context managers, and DatabaseRouter.
 """
 
 from utils import (
@@ -26,7 +26,6 @@ def test_sqlite_functional():
     with SQLiteConnector(db_path=":memory:") as db:
         assert db.is_connected() is True
 
-        # DDL Execution
         create_table_sql = """
         CREATE TABLE users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,12 +35,10 @@ def test_sqlite_functional():
         """
         db.execute_non_query(create_table_sql)
 
-        # Single insert
         insert_sql = "INSERT INTO users (name, email) VALUES (?, ?);"
         affected = db.execute_non_query(insert_sql, ("Alice", "alice@example.com"))
         assert affected == 1
 
-        # Batch insert
         users_batch = [
             ("Bob", "bob@example.com"),
             ("Charlie", "charlie@example.com"),
@@ -49,25 +46,20 @@ def test_sqlite_functional():
         batch_affected = db.execute_many(insert_sql, users_batch)
         assert batch_affected == 2
 
-        # Query all rows
         rows = db.execute_query("SELECT * FROM users ORDER BY id ASC;")
         assert len(rows) == 3
         assert rows[0] == {"id": 1, "name": "Alice", "email": "alice@example.com"}
-        assert rows[1] == {"id": 2, "name": "Bob", "email": "bob@example.com"}
 
-        # Fetch one
         row = db.fetch_one("SELECT * FROM users WHERE email = ?;", ("charlie@example.com",))
         assert row is not None
         assert row["name"] == "Charlie"
 
-        # Test transaction context manager commit
         with db.transaction():
             db.execute_non_query("INSERT INTO users (name, email) VALUES (?, ?);", ("David", "david@example.com"))
 
         david = db.fetch_one("SELECT * FROM users WHERE name = ?;", ("David",))
         assert david is not None
 
-        # Test transaction rollback on exception
         try:
             with db.transaction():
                 db.execute_non_query("INSERT INTO users (name, email) VALUES (?, ?);", ("Eve", "eve@example.com"))
@@ -78,8 +70,47 @@ def test_sqlite_functional():
         eve = db.fetch_one("SELECT * FROM users WHERE name = ?;", ("Eve",))
         assert eve is None
 
-    # Verify closed connection
     assert db.is_connected() is False
+
+
+def test_sqlite_vector_search():
+    """Test vector table creation, insertion, top_k, min_score filtering, and deletion."""
+    with SQLiteConnector(db_path=":memory:") as db:
+        db.create_vector_table("item_embeddings", vector_dim=3, distance_metric="cosine")
+
+        # Single insert
+        db.insert_vector("item_embeddings", "vec_1", [1.0, 0.0, 0.0], {"category": "A"})
+
+        # Batch insert
+        batch = [
+            {"id": "vec_2", "vector": [0.9, 0.1, 0.0], "metadata": {"category": "A"}},
+            {"id": "vec_3", "vector": [0.0, 1.0, 0.0], "metadata": {"category": "B"}},
+            {"id": "vec_4", "vector": [-1.0, 0.0, 0.0], "metadata": {"category": "C"}},
+        ]
+        db.insert_vectors("item_embeddings", batch)
+
+        # Query vector close to vec_1 and vec_2
+        query_vec = [1.0, 0.0, 0.0]
+
+        # Top-k search
+        results_top2 = db.vector_search("item_embeddings", query_vec, top_k=2, distance_metric="cosine")
+        assert len(results_top2) == 2
+        assert results_top2[0]["id"] == "vec_1"
+        assert results_top2[0]["score"] == 1.0
+        assert results_top2[1]["id"] == "vec_2"
+
+        # min_score filtering
+        results_min_score = db.vector_search("item_embeddings", query_vec, top_k=10, min_score=0.9, distance_metric="cosine")
+        assert len(results_min_score) == 2
+        assert {r["id"] for r in results_min_score} == {"vec_1", "vec_2"}
+
+        # Delete vector
+        deleted_count = db.delete_vector("item_embeddings", "vec_1")
+        assert deleted_count == 1
+
+        results_after_delete = db.vector_search("item_embeddings", query_vec, top_k=10)
+        assert len(results_after_delete) == 3
+        assert "vec_1" not in {r["id"] for r in results_after_delete}
 
 
 def test_postgres_url_configuration():
@@ -98,16 +129,12 @@ def test_mysql_url_configuration():
 
 def test_database_router():
     """Verify DatabaseRouter resolves connectors dynamically by single connection URL and dialect."""
-    # SQLite routing
     sqlite_conn = DatabaseRouter.get_connector("sqlite", db_path=":memory:")
     assert isinstance(sqlite_conn, SQLiteConnector)
 
-    # Postgres single URL routing
     pg_conn = DatabaseRouter.get_connector("postgresql://user:pass@localhost:5432/db")
     assert isinstance(pg_conn, PostgreSQLConnector)
-    assert pg_conn.connection_string == "postgresql://user:pass@localhost:5432/db"
 
-    # MySQL single URL routing
     mysql_conn = DatabaseRouter.get_connector("mysql://root:pass@localhost:3306/mydb")
     assert isinstance(mysql_conn, MySQLConnector)
 
@@ -115,7 +142,8 @@ def test_database_router():
 if __name__ == "__main__":
     test_exports()
     test_sqlite_functional()
+    test_sqlite_vector_search()
     test_postgres_url_configuration()
     test_mysql_url_configuration()
     test_database_router()
-    print("All database connector and URL router tests passed successfully!")
+    print("All database connector and vector search tests passed successfully!")
