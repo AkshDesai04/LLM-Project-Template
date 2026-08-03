@@ -1,13 +1,10 @@
 """
 OracleDB Database Connector.
-
-Provides a robust Oracle database connector using modern python-oracledb configured via single connection URLs or DSNs,
-dictionary row mapping, and transactions.
 """
 
 import contextlib
 from typing import Any, Dict, List, Optional, Tuple, Union
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 
 try:
     import oracledb
@@ -16,7 +13,7 @@ except ImportError:
     ORACLEDB_AVAILABLE = False
     oracledb = None
 
-from .base import BaseDatabaseConnector
+from utils.db.base import BaseDatabaseConnector
 from utils.env import get_database_url, get_secret
 from utils.logging import get_logger
 
@@ -24,19 +21,9 @@ logger = get_logger("OracleDBConnector")
 
 
 class OracleDBConnector(BaseDatabaseConnector):
-    """
-    Connector for Oracle Database instances configured via a single connection URL or DSN.
-    """
+    """Connector for Oracle Database instances configured via a single connection URL or DSN."""
 
-    def __init__(
-        self,
-        connection_string: Optional[str] = None,
-        dsn: Optional[str] = None,
-    ):
-        """
-        Initializes OracleDB connector parameters using a single connection URL or DSN.
-        Resolves from connection_string / dsn / ORACLE_URL / ORACLE_DSN / DATABASE_URL env vars.
-        """
+    def __init__(self, connection_string: Optional[str] = None, dsn: Optional[str] = None):
         url = (
             connection_string
             or dsn
@@ -44,7 +31,6 @@ class OracleDBConnector(BaseDatabaseConnector):
             or get_secret("ORACLE_DSN", raise_error=False)
             or get_database_url(raise_error=False)
         )
-
         parsed_user, parsed_pass, parsed_dsn = None, None, None
         if url:
             clean_url = url[9:] if url.startswith("oracle://") else url
@@ -68,12 +54,6 @@ class OracleDBConnector(BaseDatabaseConnector):
         self._in_transaction: bool = False
 
     def connect(self):
-        """
-        Establishes connection to Oracle Database.
-
-        Returns:
-            oracledb.Connection: Active Oracle connection object.
-        """
         if not ORACLEDB_AVAILABLE:
             message = "oracledb is not installed. Please install 'oracledb' to use OracleDBConnector."
             logger.error(message)
@@ -91,7 +71,6 @@ class OracleDBConnector(BaseDatabaseConnector):
         return self._connection
 
     def close(self) -> None:
-        """Closes active Oracle connection."""
         if self._connection is not None:
             logger.info("Closing Oracle connection...")
             self._connection.close()
@@ -99,12 +78,6 @@ class OracleDBConnector(BaseDatabaseConnector):
             logger.info("Oracle connection closed.")
 
     def is_connected(self) -> bool:
-        """
-        Checks whether Oracle connection is healthy.
-
-        Returns:
-            bool: True if connected and responsive, False otherwise.
-        """
         if not ORACLEDB_AVAILABLE or self._connection is None:
             return False
         try:
@@ -112,35 +85,22 @@ class OracleDBConnector(BaseDatabaseConnector):
         except Exception:
             return False
 
-    def execute_query(
-        self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Executes a SELECT query and returns rows as dictionaries.
-        """
+    def execute_query(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         conn = self.connect()
-        params = params or ()
         try:
             with conn.cursor() as cursor:
-                cursor.execute(query, params)
+                cursor.execute(query, params or ())
                 columns = [col[0].lower() for col in cursor.description]
-                rows = cursor.fetchall()
-                return [dict(zip(columns, row)) for row in rows]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"OracleDB query execution failed: {e}")
             raise
 
-    def execute_non_query(
-        self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
-    ) -> int:
-        """
-        Executes an INSERT, UPDATE, DELETE, or DDL statement.
-        """
+    def execute_non_query(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> int:
         conn = self.connect()
-        params = params or ()
         try:
             with conn.cursor() as cursor:
-                cursor.execute(query, params)
+                cursor.execute(query, params or ())
                 rowcount = cursor.rowcount
             if not self._in_transaction:
                 conn.commit()
@@ -151,12 +111,7 @@ class OracleDBConnector(BaseDatabaseConnector):
             logger.error(f"OracleDB non-query execution failed: {e}")
             raise
 
-    def execute_many(
-        self, query: str, params_list: List[Union[Tuple[Any, ...], Dict[str, Any]]]
-    ) -> int:
-        """
-        Executes a query repeatedly with batch parameters.
-        """
+    def execute_many(self, query: str, params_list: List[Union[Tuple[Any, ...], Dict[str, Any]]]) -> int:
         conn = self.connect()
         try:
             with conn.cursor() as cursor:
@@ -171,17 +126,11 @@ class OracleDBConnector(BaseDatabaseConnector):
             logger.error(f"OracleDB executemany failed: {e}")
             raise
 
-    def fetch_one(
-        self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Executes a query and returns the first row as a dictionary.
-        """
+    def fetch_one(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
         conn = self.connect()
-        params = params or ()
         try:
             with conn.cursor() as cursor:
-                cursor.execute(query, params)
+                cursor.execute(query, params or ())
                 if not cursor.description:
                     return None
                 columns = [col[0].lower() for col in cursor.description]
@@ -193,9 +142,6 @@ class OracleDBConnector(BaseDatabaseConnector):
 
     @contextlib.contextmanager
     def transaction(self):
-        """
-        Context manager for OracleDB transaction safety.
-        """
         conn = self.connect()
         was_in_transaction = self._in_transaction
         self._in_transaction = True

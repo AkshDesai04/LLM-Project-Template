@@ -1,8 +1,5 @@
 """
 MySQL Database Connector.
-
-Provides a robust MySQL connector using pymysql with support for single connection URLs,
-DictCursor row formatting, and transactions.
 """
 
 import contextlib
@@ -17,7 +14,7 @@ except ImportError:
     PYMYSQL_AVAILABLE = False
     pymysql = None
 
-from .base import BaseDatabaseConnector
+from utils.db.base import BaseDatabaseConnector
 from utils.env import get_database_url, get_secret
 from utils.logging import get_logger
 
@@ -25,19 +22,9 @@ logger = get_logger("MySQLConnector")
 
 
 class MySQLConnector(BaseDatabaseConnector):
-    """
-    Connector for MySQL relational databases configured via a single connection URL.
-    """
+    """Connector for MySQL relational databases configured via a single connection URL."""
 
-    def __init__(
-        self,
-        connection_string: Optional[str] = None,
-        charset: str = "utf8mb4",
-    ):
-        """
-        Initializes MySQL connector parameters using a single connection URL.
-        Resolves from connection_string / MYSQL_URL / DATABASE_URL env vars.
-        """
+    def __init__(self, connection_string: Optional[str] = None, charset: str = "utf8mb4"):
         self.connection_string = (
             connection_string
             or get_secret("MYSQL_URL", raise_error=False)
@@ -48,12 +35,6 @@ class MySQLConnector(BaseDatabaseConnector):
         self._in_transaction: bool = False
 
     def connect(self):
-        """
-        Establishes connection to MySQL database.
-
-        Returns:
-            pymysql.connections.Connection: Active connection instance.
-        """
         if not PYMYSQL_AVAILABLE:
             message = "pymysql is not installed. Please install 'pymysql' to use MySQLConnector."
             logger.error(message)
@@ -87,7 +68,6 @@ class MySQLConnector(BaseDatabaseConnector):
         return self._connection
 
     def close(self) -> None:
-        """Closes active MySQL connection."""
         if self._connection is not None and self._connection.open:
             logger.info("Closing MySQL connection...")
             self._connection.close()
@@ -95,12 +75,6 @@ class MySQLConnector(BaseDatabaseConnector):
             logger.info("MySQL connection closed.")
 
     def is_connected(self) -> bool:
-        """
-        Checks whether MySQL connection is active.
-
-        Returns:
-            bool: True if connected and responsive, False otherwise.
-        """
         if not PYMYSQL_AVAILABLE or self._connection is None or not self._connection.open:
             return False
         try:
@@ -109,34 +83,21 @@ class MySQLConnector(BaseDatabaseConnector):
         except Exception:
             return False
 
-    def execute_query(
-        self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Executes a SELECT query and returns rows as dictionaries.
-        """
+    def execute_query(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         conn = self.connect()
-        params = params or ()
         try:
             with conn.cursor() as cursor:
-                cursor.execute(query, params)
-                rows = cursor.fetchall()
-                return list(rows)
+                cursor.execute(query, params or ())
+                return list(cursor.fetchall())
         except Exception as e:
             logger.error(f"MySQL query execution failed: {e}")
             raise
 
-    def execute_non_query(
-        self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
-    ) -> int:
-        """
-        Executes an INSERT, UPDATE, DELETE, or DDL statement.
-        """
+    def execute_non_query(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> int:
         conn = self.connect()
-        params = params or ()
         try:
             with conn.cursor() as cursor:
-                rowcount = cursor.execute(query, params)
+                rowcount = cursor.execute(query, params or ())
             if not self._in_transaction:
                 conn.commit()
             return rowcount
@@ -146,12 +107,7 @@ class MySQLConnector(BaseDatabaseConnector):
             logger.error(f"MySQL non-query execution failed: {e}")
             raise
 
-    def execute_many(
-        self, query: str, params_list: List[Union[Tuple[Any, ...], Dict[str, Any]]]
-    ) -> int:
-        """
-        Executes a query repeatedly with batch parameters.
-        """
+    def execute_many(self, query: str, params_list: List[Union[Tuple[Any, ...], Dict[str, Any]]]) -> int:
         conn = self.connect()
         try:
             with conn.cursor() as cursor:
@@ -165,17 +121,11 @@ class MySQLConnector(BaseDatabaseConnector):
             logger.error(f"MySQL executemany failed: {e}")
             raise
 
-    def fetch_one(
-        self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Executes a query and returns the first row as a dictionary.
-        """
+    def fetch_one(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
         conn = self.connect()
-        params = params or ()
         try:
             with conn.cursor() as cursor:
-                cursor.execute(query, params)
+                cursor.execute(query, params or ())
                 row = cursor.fetchone()
                 return row if row else None
         except Exception as e:
@@ -184,9 +134,6 @@ class MySQLConnector(BaseDatabaseConnector):
 
     @contextlib.contextmanager
     def transaction(self):
-        """
-        Context manager for MySQL transaction safety.
-        """
         conn = self.connect()
         was_in_transaction = self._in_transaction
         self._in_transaction = True
