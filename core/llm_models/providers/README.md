@@ -28,10 +28,10 @@ The top-level `providers/__init__.py` re-exports all provider classes for backwa
 Every provider class implements these four core methods defined in `core/llm_models/base_provider.py`:
 
 ```python
-model_response(module, uploaded_file=None, **kwargs) -> Any
-upload_media(file_bytes, mime_type) -> Any
-embed_content(text, **kwargs) -> list[float] | list[list[float]]
-evaluate_response(input_prompt, generated_output, rubric=None) -> JudgeResult
+model_response(module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any
+upload_media(file_bytes: bytes, mime_type: str) -> Any
+embed_content(input_content: Union[str, List[str]], **kwargs) -> Union[List[float], List[List[float]]]
+evaluate_response(input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult
 ```
 
 ### Shared Conventions
