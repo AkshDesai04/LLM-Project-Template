@@ -13,11 +13,11 @@ Organized into domain-specific subpackages:
 import sys
 
 # Subpackage imports
-from . import concurrency, db, document, env, io, logging
+from utils import concurrency, db, document, env, io, logging
 
 # Re-exports for top-level convenience
-from .concurrency import ThreadSafeRateLimiter, parallel_execute
-from .db import (
+from utils.concurrency import ThreadSafeRateLimiter, parallel_execute
+from utils.db import (
     BaseDatabaseConnector,
     DatabaseRouter,
     MongoDBConnector,
@@ -26,8 +26,8 @@ from .db import (
     PostgreSQLConnector,
     SQLiteConnector,
 )
-from .document import MarkItDownUtils, convert_to_markdown
-from .env import (
+from utils.document import MarkItDownUtils, convert_to_markdown
+from utils.env import (
     KEY_LOCATION_AWS_SM,
     KEY_LOCATION_LOCAL,
     KEY_LOCATION_NAME,
@@ -38,8 +38,8 @@ from .env import (
     get_local_secret,
     get_secret,
 )
-from .io import get_file, read_csv, read_file, read_prompt
-from .logging import JsonFormatter, LambdaLogger, get_logger, get_logging_level, get_logging_mode
+from utils.io import get_file, read_csv, read_file, read_prompt
+from utils.logging import JsonFormatter, LambdaLogger, get_logger, get_logging_level, get_logging_mode
 
 # Backward-compatibility module aliases for legacy import paths
 sys.modules["utils.logger"] = logging.logger

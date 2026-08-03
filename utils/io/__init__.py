@@ -2,7 +2,7 @@
 File I/O operations module.
 """
 
-from .file_ops import (
+from utils.io.file_ops import (
     read_file,
     get_file,
     read_prompt,
