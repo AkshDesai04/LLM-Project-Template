@@ -4,7 +4,7 @@ MySQL Database Connector Implementation.
 
 import contextlib
 from typing import Any, Dict, List, Optional, Tuple, Union
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 try:
     import pymysql
@@ -69,6 +69,11 @@ class MySQLConnector(BaseDatabaseConnector):
                 "cursorclass": pymysql.cursors.DictCursor,
                 "autocommit": False,
             }
+            if parsed.query:
+                for k, v in parse_qs(parsed.query).items():
+                    if k not in kwargs and v:
+                        kwargs[k] = v[0]
+
             filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
             self._connection = pymysql.connect(**filtered_kwargs)
             logger.info("Successfully connected to MySQL database.")
