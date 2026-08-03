@@ -1,5 +1,5 @@
 """
-MySQL Database Connector.
+MySQL Database Connector Implementation.
 """
 
 import contextlib

@@ -12,7 +12,7 @@ All utility modules follow two strict structural rules:
 |---|---|---|
 | `utils.logging` | Logging framework (`NORMAL` file/console & `LAMBDA` stdout modes) | `logger.py`, `lambda_logger.py` |
 | `utils.env` | Secrets manager (`LOCAL` .env & `AWS_SM` AWS Secrets Manager) | `env_ops.py`, `constants.py`, `aws_secrets.py`, `gemini_credentials.py` |
-| `utils.db` | Database connectors & factory router (SQLite, Postgres, MySQL) | `base.py`, `helpers.py`, `router.py`, `sqlite.py`, `postgres.py`, `mysql.py` |
+| `utils.db` | Database connectors & factory router (SQLite, Postgres, MySQL) | `base.py`, `helpers.py`, `router.py`, `sqlite/`, `postgres/`, `mysql/` |
 | `utils.io` | Text, binary, prompt and CSV reader utilities | `file_ops.py` |
 | `utils.concurrency` | Thread-pool fan-out with retries and rate limiting | `parallel_executor.py` |
 | `utils.document` | Document/URL/media → Markdown conversion via MarkItDown | `markitdown.py` |

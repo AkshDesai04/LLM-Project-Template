@@ -47,9 +47,9 @@ sys.modules["utils.parallel_executor"] = concurrency.parallel_executor
 sys.modules["utils.markitdown_utils"] = document.markitdown
 sys.modules["utils.base_connector"] = db.base
 sys.modules["utils.db_router"] = db.router
-sys.modules["utils.mysql_connector"] = db.mysql
-sys.modules["utils.postgres_connector"] = db.postgres
-sys.modules["utils.sqlite_connector"] = db.sqlite
+sys.modules["utils.mysql_connector"] = db.mysql.connector
+sys.modules["utils.postgres_connector"] = db.postgres.connector
+sys.modules["utils.sqlite_connector"] = db.sqlite.connector
 
 __all__ = [
     # Subpackages

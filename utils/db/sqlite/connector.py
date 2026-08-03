@@ -1,5 +1,5 @@
 """
-SQLite Database Connector.
+SQLite Database Connector Implementation.
 """
 
 import contextlib

@@ -89,7 +89,7 @@ Standardized I/O operations ensuring utf-8 encodings and proper error handling f
 ### `utils/logging/` (`logger.py`, `lambda_logger.py`)
 Provides a robust dual-output logging system driven by `LOGGING_MODE` (`NORMAL` vs `LAMBDA`) and `LOGGING_LEVEL`.
 
-### `utils/db/` (`base.py`, `helpers.py`, `router.py`, `sqlite.py`, `postgres.py`, `mysql.py`)
+### `utils/db/` (`base.py`, `helpers.py`, `router.py`, `sqlite/`, `postgres/`, `mysql/`)
 Interoperable database connectors and factory router supporting SQLite, PostgreSQL, and MySQL. All connectors stay under 180 lines.
 
 ### `utils/document/` (`markitdown.py`)

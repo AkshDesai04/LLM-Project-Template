@@ -1,5 +1,5 @@
 """
-PostgreSQL Database Connector.
+PostgreSQL Database Connector Implementation.
 """
 
 import contextlib
