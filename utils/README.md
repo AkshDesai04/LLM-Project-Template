@@ -8,11 +8,11 @@ All utility modules follow two strict structural rules:
 
 ## Subpackage Directory Layout
 
-| Subpackage | Main Components | Key Files |
+| Subpackage | Main Components | Key Files / Docs |
 |---|---|---|
 | `utils.logging` | Logging framework (`NORMAL` file/console & `LAMBDA` stdout modes) | `logger.py`, `lambda_logger.py` |
-| `utils.env` | Secrets manager (`LOCAL` .env & `AWS_SM` AWS Secrets Manager) | `env_ops.py`, `constants.py`, `aws_secrets.py`, `gemini_credentials.py` |
-| `utils.db` | Database connectors & factory router (SQLite, Postgres, MySQL) | `base.py`, `helpers.py`, `router.py`, `sqlite/`, `postgres/`, `mysql/` |
+| `utils.env` | Secrets manager (`LOCAL` .env & `AWS_SM` AWS Secrets Manager) | `env_ops.py`, `constants.py`, `aws_secrets.py` |
+| `utils.db` | Database connectors, factory router & native/fallback vector search (SQLite, Postgres, MySQL) | [`db/README.md`](file:///e:/Code/Personal/LLM-Project-Template/utils/db/README.md), `base.py`, `helpers.py`, `router.py` |
 | `utils.io` | Text, binary, prompt and CSV reader utilities | `file_ops.py` |
 | `utils.concurrency` | Thread-pool fan-out with retries and rate limiting | `parallel_executor.py` |
 | `utils.document` | Document/URL/media → Markdown conversion via MarkItDown | `markitdown.py` |
