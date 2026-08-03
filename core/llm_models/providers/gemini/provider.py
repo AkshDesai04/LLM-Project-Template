@@ -18,7 +18,7 @@ from utils.env import (
     GEMINI_KEY_TYPE_SERVICE_ACC_JSON,
     GEMINI_API_KEY_NAME,
 )
-from core.llm_models.base_provider import LLMProvider, JudgeResult
+from core.llm_models.base_provider import LLMProvider
 from core.llm_models.cost_tracker import cost_tracker
 from core.llm_models.providers.gemini.media_handler import upload_gemini_media
 from core.llm_models.providers.gemini.response_handler import generate_gemini_response, split_thought_parts
@@ -123,19 +123,3 @@ class GeminiProvider(LLMProvider):
         except Exception as e:
             logger.error(f"Gemini embedding failed: {e}")
             raise
-
-    def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
-        judge_prompt = f"""
-        You are an impartial judge evaluating the quality of an AI-generated response.
-        [Original Prompt]: {input_prompt}
-        [AI Generated Response]: {generated_output}
-        [Evaluation Rubric]: {rubric if rubric else "Evaluate based on accuracy, clarity, and adherence to the prompt."}
-        Please provide a score from 1-10, your reasoning, and any suggestions for improvement.
-        """
-
-        class JudgeModule(BaseModule):
-            prompt: str = judge_prompt
-            structure: Any = JudgeResult
-            model: str = self.model_name
-
-        return self.model_response(JudgeModule())

@@ -10,7 +10,6 @@ from core.modules.base import Base as BaseModule
 
 logger = get_logger("LLMProvider")
 
-# Default Fallback Values
 DEFAULT_RESPONSE_MIME_TYPE = "application/json"
 DEFAULT_PRESENCE_PENALTY = 0.0
 DEFAULT_FREQUENCY_PENALTY = 0.0
@@ -98,7 +97,19 @@ class LLMProvider(ABC):
     def embed_content(self, input_content: Union[str, List[str]], **kwargs) -> Union[List[float], List[List[float]]]:
         pass
 
-    @abstractmethod
     def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
-        """Evaluates a model's response using the LLM-as-a-Judge pattern."""
-        pass
+        """Default evaluation using the LLM-as-a-Judge pattern."""
+        judge_prompt = f"""
+        You are an impartial judge evaluating the quality of an AI-generated response.
+        [Original Prompt]: {input_prompt}
+        [AI Generated Response]: {generated_output}
+        [Evaluation Rubric]: {rubric if rubric else "Evaluate based on accuracy, clarity, and adherence to the prompt."}
+        Please provide a score from 1-10, your reasoning, and any suggestions for improvement.
+        """
+
+        class JudgeModule(BaseModule):
+            prompt: str = judge_prompt
+            structure: Any = JudgeResult
+            model: str = self.model_name
+
+        return self.model_response(JudgeModule())
