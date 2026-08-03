@@ -3,6 +3,7 @@ OpenAI Chat Completions API handler.
 """
 
 import inspect
+import time
 from typing import Any, Optional
 from pydantic import BaseModel
 

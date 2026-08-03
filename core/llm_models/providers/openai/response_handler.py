@@ -20,6 +20,7 @@ from core.llm_models.providers.openai.responses_api import (
 from core.llm_models.providers.openai.chat_completions import (
     is_chat_completion_endpoint_error,
     execute_chat_completion,
+    is_reasoning_model,
 )
 
 logger = get_logger("OpenAIResponseHandler")
