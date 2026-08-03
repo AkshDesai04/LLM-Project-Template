@@ -56,8 +56,19 @@ def search_postgres_vectors(
 ) -> List[Dict[str, Any]]:
     try:
         vec_str = serialize_vector(query_vector)
-        op = "<=>" if distance_metric == "cosine" else ("<->" if distance_metric in ("l2", "euclidean") else "<#>")
-        score_expr = f"1 - (vector {op} %s::vector)" if distance_metric == "cosine" else f"1 / (1 + (vector {op} %s::vector))"
+        metric_clean = (distance_metric or "cosine").lower()
+        if metric_clean == "cosine":
+            op = "<=>"
+            score_expr = f"1 - (vector {op} %s::vector)"
+        elif metric_clean in ("l2", "euclidean"):
+            op = "<->"
+            score_expr = f"1 / (1 + (vector {op} %s::vector))"
+        elif metric_clean == "dot":
+            op = "<#>"
+            score_expr = f"-(vector {op} %s::vector)"
+        else:
+            op = "<=>"
+            score_expr = f"1 - (vector {op} %s::vector)"
 
         sql = f"SELECT id, vector, metadata, ({score_expr}) AS score FROM {table_name}"
         params = [vec_str]
@@ -85,6 +96,11 @@ def search_postgres_vectors(
         return results
     except Exception as e:
         logger.warning(f"Native pgvector search failed ({e}); falling back to generic python vector search...")
+        if hasattr(connector, "_connection") and connector._connection:
+            try:
+                connector._connection.rollback()
+            except Exception:
+                pass
         return generic_vector_search(connector, table_name, query_vector, top_k=top_k, min_score=min_score, distance_metric=distance_metric)
 
 
