@@ -20,9 +20,7 @@ from utils.concurrency import ThreadSafeRateLimiter, parallel_execute
 from utils.db import (
     BaseDatabaseConnector,
     DatabaseRouter,
-    MongoDBConnector,
     MySQLConnector,
-    OracleDBConnector,
     PostgreSQLConnector,
     SQLiteConnector,
 )
@@ -49,9 +47,7 @@ sys.modules["utils.parallel_executor"] = concurrency.parallel_executor
 sys.modules["utils.markitdown_utils"] = document.markitdown
 sys.modules["utils.base_connector"] = db.base
 sys.modules["utils.db_router"] = db.router
-sys.modules["utils.mongo_connector"] = db.mongo
 sys.modules["utils.mysql_connector"] = db.mysql
-sys.modules["utils.oracle_connector"] = db.oracle
 sys.modules["utils.postgres_connector"] = db.postgres
 sys.modules["utils.sqlite_connector"] = db.sqlite
 
@@ -66,9 +62,7 @@ __all__ = [
     # Connectors & Router
     "BaseDatabaseConnector",
     "DatabaseRouter",
-    "MongoDBConnector",
     "MySQLConnector",
-    "OracleDBConnector",
     "PostgreSQLConnector",
     "SQLiteConnector",
     # Logging

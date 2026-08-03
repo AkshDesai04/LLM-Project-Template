@@ -51,7 +51,7 @@ Contains provider-specific modular implementations (`gemini`, `openai`, `anthrop
 General utility functions for environment management, file handling, database connections, multi-threading execution, and complex file conversion.
 - `utils/env/`: Secrets manager supporting `.env` (`LOCAL`) and AWS Secrets Manager (`AWS_SM`).
 - `utils/logging/`: Logging framework supporting console/file output (`NORMAL`) and CloudWatch/stdout output (`LAMBDA`).
-- `utils/db/`: Database connectors for SQLite, PostgreSQL, MySQL, OracleDB, and MongoDB.
+- `utils/db/`: Database connectors for SQLite, PostgreSQL, and MySQL.
 - `utils/io/`: Text, prompt, and CSV readers.
 - `utils/concurrency/`: Rate-limited multi-threaded parallel execution engine.
 - `utils/document/`: Document conversion utility using MarkItDown.

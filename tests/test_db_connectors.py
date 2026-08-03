@@ -8,9 +8,7 @@ context managers, DatabaseRouter factory routing, and fallback behavior for opti
 from utils import (
     BaseDatabaseConnector,
     DatabaseRouter,
-    MongoDBConnector,
     MySQLConnector,
-    OracleDBConnector,
     PostgreSQLConnector,
     SQLiteConnector,
 )
@@ -21,8 +19,6 @@ def test_exports():
     assert issubclass(SQLiteConnector, BaseDatabaseConnector)
     assert issubclass(PostgreSQLConnector, BaseDatabaseConnector)
     assert issubclass(MySQLConnector, BaseDatabaseConnector)
-    assert issubclass(MongoDBConnector, BaseDatabaseConnector)
-    assert issubclass(OracleDBConnector, BaseDatabaseConnector)
 
 
 def test_sqlite_functional():
@@ -100,23 +96,6 @@ def test_mysql_url_configuration():
     assert url_conn.is_connected() is False
 
 
-def test_mongo_url_configuration():
-    """Verify MongoDBConnector connection URI resolution."""
-    url_conn = MongoDBConnector(uri="mongodb://admin:secret@localhost:27017/db", database="test_db")
-    assert url_conn.uri == "mongodb://admin:secret@localhost:27017/db"
-    assert url_conn.database_name == "test_db"
-    assert url_conn.is_connected() is False
-
-
-def test_oracle_url_configuration():
-    """Verify OracleDBConnector connection URL resolution."""
-    url_conn = OracleDBConnector(connection_string="oracle://sysuser:syspass@localhost:1521/ORCLCDB")
-    assert url_conn.user == "sysuser"
-    assert url_conn.password == "syspass"
-    assert url_conn.dsn == "localhost:1521/ORCLCDB"
-    assert url_conn.is_connected() is False
-
-
 def test_database_router():
     """Verify DatabaseRouter resolves connectors dynamically by single connection URL and dialect."""
     # SQLite routing
@@ -132,22 +111,11 @@ def test_database_router():
     mysql_conn = DatabaseRouter.get_connector("mysql://root:pass@localhost:3306/mydb")
     assert isinstance(mysql_conn, MySQLConnector)
 
-    # MongoDB single URI routing
-    mongo_conn = DatabaseRouter.get_connector("mongodb://localhost:27017")
-    assert isinstance(mongo_conn, MongoDBConnector)
-
-    # Oracle single URL routing
-    oracle_conn = DatabaseRouter.get_connector("oracle://system:oracle@localhost:1521/ORCLCDB")
-    assert isinstance(oracle_conn, OracleDBConnector)
-    assert oracle_conn.user == "system"
-
 
 if __name__ == "__main__":
     test_exports()
     test_sqlite_functional()
     test_postgres_url_configuration()
     test_mysql_url_configuration()
-    test_mongo_url_configuration()
-    test_oracle_url_configuration()
     test_database_router()
     print("All database connector and URL router tests passed successfully!")
