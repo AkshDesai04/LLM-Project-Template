@@ -2,7 +2,7 @@
 Document conversion module.
 """
 
-from .markitdown import (
+from utils.document.markitdown import (
     MarkItDownUtils,
     convert_to_markdown,
 )

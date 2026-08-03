@@ -2,7 +2,7 @@
 Concurrency and parallel execution module.
 """
 
-from .parallel_executor import (
+from utils.concurrency.parallel_executor import (
     parallel_execute,
     ThreadSafeRateLimiter,
     calculate_worker_count,

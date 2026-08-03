@@ -3,15 +3,26 @@ import os
 import tempfile
 from io import BytesIO
 from typing import List
-import cv2
-import PyPDF2
+
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+    cv2 = None
+
+try:
+    import PyPDF2
+    PYPDF2_AVAILABLE = True
+except ImportError:
+    PYPDF2_AVAILABLE = False
+    PyPDF2 = None
 
 from utils.logging import get_logger
 
 logger = get_logger("MediaUtils")
 
-# Top-level Constants
-MAX_VIDEO_FILE_SIZE: int = 512 * 1024 * 1024  # 512 MB limit
+MAX_VIDEO_FILE_SIZE: int = 512 * 1024 * 1024
 DEFAULT_FRAMES_PER_SECOND: int = 1
 DEFAULT_VIDEO_FPS_FALLBACK: int = 30
 VIDEO_TEMP_SUFFIX: str = ".mp4"
@@ -22,6 +33,8 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     """Helper to extract text from PDF bytes using PyPDF2."""
     if not pdf_bytes:
         raise ValueError("Provided PDF bytes array is empty.")
+    if not PYPDF2_AVAILABLE:
+        raise ImportError("PyPDF2 is not installed. Please install 'PyPDF2' to process PDF files.")
     try:
         reader = PyPDF2.PdfReader(BytesIO(pdf_bytes))
         text = ""
@@ -36,9 +49,9 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
 
 
 def process_video_frames(video_bytes: bytes, frames_per_second: int = DEFAULT_FRAMES_PER_SECOND) -> List[dict]:
-    """
-    Extracts frames from video bytes, encodes them, and returns a list of dictionaries formatted for OpenAI.
-    """
+    """Extracts frames from video bytes, encodes them, and returns a list of dictionaries formatted for OpenAI."""
+    if not CV2_AVAILABLE:
+        raise ImportError("opencv-python (cv2) is not installed. Please install 'opencv-python' to process video files.")
     if len(video_bytes) > MAX_VIDEO_FILE_SIZE:
         max_mb = MAX_VIDEO_FILE_SIZE // (1024 * 1024)
         raise ValueError(f"Video file exceeds the maximum allowed size of {max_mb}MB.")
@@ -53,15 +66,13 @@ def process_video_frames(video_bytes: bytes, frames_per_second: int = DEFAULT_FR
 
     base64_frames = []
     video = cv2.VideoCapture(temp_file.name)
-    
+
     try:
         total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = video.get(cv2.CAP_PROP_FPS)
-        
-        # Prevent division by zero if fps is not detected
         fps = fps if fps > 0 else DEFAULT_VIDEO_FPS_FALLBACK
         frame_interval = max(1, int(fps / frames_per_second))
-        
+
         for frame_num in range(0, total_frames, frame_interval):
             video.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
             success, frame = video.read()
@@ -78,7 +89,6 @@ def process_video_frames(video_bytes: bytes, frames_per_second: int = DEFAULT_FR
             os.unlink(temp_file.name)
 
     logger.info(f"Extracted {len(base64_frames)} frames from video.")
-
     return [
         {
             "type": "image_url",

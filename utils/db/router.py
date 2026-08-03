@@ -7,25 +7,20 @@ All connector credentials seamlessly resolve via utils.env (honouring KEY_LOCATI
 to fetch credentials from .env or AWS Secrets Manager).
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
-from .base import BaseDatabaseConnector
-from .mongo import MongoDBConnector
-from .mysql import MySQLConnector
-from .oracle import OracleDBConnector
-from .postgres import PostgreSQLConnector
-from .sqlite import SQLiteConnector
+from utils.db.base import BaseDatabaseConnector
+from utils.db.mysql import MySQLConnector
+from utils.db.postgres import PostgreSQLConnector
+from utils.db.sqlite import SQLiteConnector
 from utils.env import get_database_url
 from utils.logging import get_logger
 
 logger = get_logger("DatabaseRouter")
 
-# Dialect Constants
 DIALECT_SQLITE = "sqlite"
 DIALECT_POSTGRES = "postgres"
 DIALECT_MYSQL = "mysql"
-DIALECT_MONGO = "mongo"
-DIALECT_ORACLE = "oracle"
 
 DIALECT_ALIASES = {
     "sqlite": DIALECT_SQLITE,
@@ -35,10 +30,6 @@ DIALECT_ALIASES = {
     "pg": DIALECT_POSTGRES,
     "mysql": DIALECT_MYSQL,
     "mariadb": DIALECT_MYSQL,
-    "mongo": DIALECT_MONGO,
-    "mongodb": DIALECT_MONGO,
-    "oracle": DIALECT_ORACLE,
-    "oracledb": DIALECT_ORACLE,
 }
 
 
@@ -59,11 +50,10 @@ class DatabaseRouter:
             db_identifier: Dialect name (e.g. 'postgres', 'sqlite') or URI (e.g. 'postgresql://...').
 
         Returns:
-            str: Canonical dialect key ('sqlite', 'postgres', 'mysql', 'mongo', 'oracle').
+            str: Canonical dialect key ('sqlite', 'postgres', 'mysql').
         """
         clean = db_identifier.strip().lower()
 
-        # Extract scheme if a URI is provided
         if "://" in clean:
             scheme = clean.split("://", 1)[0]
             if "+" in scheme:
@@ -88,7 +78,7 @@ class DatabaseRouter:
         Factory method to instantiate the requested database connector.
 
         Args:
-            db_type_or_url: Dialect name (e.g. 'postgres', 'sqlite', 'mysql', 'mongo', 'oracle')
+            db_type_or_url: Dialect name (e.g. 'postgres', 'sqlite', 'mysql')
                             or single connection string URL. If None, defaults to DATABASE_URL or 'sqlite'.
             **kwargs: Direct overrides for connector initialization parameters.
 
@@ -118,19 +108,5 @@ class DatabaseRouter:
             if not connection_string and "://" in identifier:
                 connection_string = identifier
             return MySQLConnector(connection_string=connection_string, **kwargs)
-
-        if dialect == DIALECT_MONGO:
-            uri = kwargs.pop("uri", None)
-            connection_string = kwargs.pop("connection_string", None)
-            if not uri and not connection_string and "://" in identifier:
-                uri = identifier
-            return MongoDBConnector(uri=uri, connection_string=connection_string, **kwargs)
-
-        if dialect == DIALECT_ORACLE:
-            connection_string = kwargs.pop("connection_string", None)
-            dsn = kwargs.pop("dsn", None)
-            if not connection_string and not dsn and ("://" in identifier or "/" in identifier or ":" in identifier):
-                connection_string = identifier
-            return OracleDBConnector(connection_string=connection_string, dsn=dsn, **kwargs)
 
         raise ValueError(f"Unable to route database connector for dialect '{dialect}'.")

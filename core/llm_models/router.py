@@ -3,13 +3,12 @@ from typing import Any, Optional, List, Union
 
 from utils.logging import get_logger
 from core.modules.base import Base as BaseModule
-from .base_provider import LLMProvider, JudgeResult
-from .cost_tracker import cost_tracker
-from .model_names import PROVIDER_ALIASES, split_model_name
+from core.llm_models.base_provider import LLMProvider, JudgeResult
+from core.llm_models.cost_tracker import cost_tracker
+from core.llm_models.model_names import PROVIDER_ALIASES, split_model_name
 
 logger = get_logger("ModelRouter")
 
-# Top-level Constants
 PROVIDER_GOOGLE = "google"
 PROVIDER_OPENAI = "openai"
 PROVIDER_ANTHROPIC = "anthropic"
@@ -36,29 +35,19 @@ class ModelRouter:
 
         self._model_chain = chain[fallback_index:]
         self._original_module = module
-
-        # Best-effort primary provider for proxy methods; model_response rebuilds per chain entry
         self.model_instance: Optional[LLMProvider] = None
+
         try:
             self.model_instance = self._build_provider(self._model_chain[0], module)
         except Exception as e:
-            logger.warning(
-                f"Could not initialize primary model '{self._model_chain[0]}' "
-                f"during router setup (will retry in model_response / fallbacks): {e}"
-            )
+            logger.warning(f"Could not initialize primary model '{self._model_chain[0]}' during router setup: {e}")
 
     @staticmethod
     def strip_routing_prefix(model_name: str) -> str:
-        """
-        Removes the provider prefix so the SDK and the cost tracker both see the
-        real model id, e.g. 'gemini/gemini-2.5-flash' -> 'gemini-2.5-flash'.
-        """
         return split_model_name(model_name)[1]
 
     def _build_provider(self, model_name: str, module: BaseModule) -> LLMProvider:
-        """Constructs the correct LLMProvider for a given model name."""
         provider = self.get_provider_by_model_name(model_name)
-
         stripped_model_name = self.strip_routing_prefix(model_name)
         module_for_init = module.model_copy(update={'model': stripped_model_name})
 
@@ -66,27 +55,22 @@ class ModelRouter:
 
         try:
             if provider == PROVIDER_GOOGLE:
-                from .providers.gemini import GeminiProvider
+                from core.llm_models.providers.gemini import GeminiProvider
                 return GeminiProvider(None, LLMProvider.prepare_module(module_for_init))
-
             if provider == PROVIDER_OPENAI:
-                from .providers.openai import OpenAIProvider
+                from core.llm_models.providers.openai import OpenAIProvider
                 return OpenAIProvider(None, LLMProvider.prepare_module(module_for_init))
-
             if provider == PROVIDER_ANTHROPIC:
-                from .providers.anthropic import AnthropicProvider
+                from core.llm_models.providers.anthropic import AnthropicProvider
                 return AnthropicProvider(None, LLMProvider.prepare_module(module_for_init))
-
             if provider == PROVIDER_PERPLEXITY:
-                from .providers.perplexity import PerplexityProvider
+                from core.llm_models.providers.perplexity import PerplexityProvider
                 return PerplexityProvider(None, LLMProvider.prepare_module(module_for_init))
-
             if provider == PROVIDER_OLLAMA:
-                from .providers.ollama import OllamaProvider
+                from core.llm_models.providers.ollama import OllamaProvider
                 return OllamaProvider(None, LLMProvider.prepare_module(module_for_init))
-
             if provider == PROVIDER_VLLM:
-                from .providers.vllm import VLLMProvider
+                from core.llm_models.providers.vllm import VLLMProvider
                 return VLLMProvider(None, LLMProvider.prepare_module(module_for_init))
 
             raise ValueError(f"Unsupported provider: '{provider}' for model '{model_name}'.")
@@ -96,48 +80,33 @@ class ModelRouter:
 
     @staticmethod
     def get_provider_by_model_name(model_name: str) -> str:
-        """Resolves the provider from the 'provider/model' prefix."""
         provider, _ = split_model_name(model_name)
         if provider:
             return provider
-
         return ModelRouter._infer_provider_from_bare_name(model_name)
 
     @staticmethod
     def _infer_provider_from_bare_name(model_name: str) -> str:
-        """
-        Guesses the provider for a name written without a prefix.
-        """
-        model_name_lower = model_name.lower()
-
-        if model_name_lower.startswith(("gpt", "o1", "o3", "o4")):
+        name = model_name.lower()
+        if name.startswith(("gpt", "o1", "o3", "o4")):
             provider = PROVIDER_OPENAI
-        elif model_name_lower.startswith("gemini"):
+        elif name.startswith("gemini"):
             provider = PROVIDER_GOOGLE
-        elif model_name_lower.startswith(("claude", "anthropic")):
+        elif name.startswith(("claude", "anthropic")):
             provider = PROVIDER_ANTHROPIC
-        elif model_name_lower.startswith(("sonar", "perplexity")):
+        elif name.startswith(("sonar", "perplexity")):
             provider = PROVIDER_PERPLEXITY
-        elif model_name_lower.startswith(("mistral", "phi", "qwen", "deepseek", "codestral", "command")):
+        elif name.startswith(("mistral", "phi", "qwen", "deepseek", "codestral", "command")):
             provider = PROVIDER_OLLAMA
-        elif model_name_lower.startswith("llama"):
+        elif name.startswith("llama"):
             provider = PROVIDER_PERPLEXITY
         else:
-            raise ValueError(
-                f"Could not determine provider for model '{model_name}'. "
-                f"Prefix the model with its provider, e.g. "
-                f"'gemini/{model_name}'. Valid prefixes: "
-                f"{', '.join(sorted(PROVIDER_ALIASES))}."
-            )
+            raise ValueError(f"Could not determine provider for model '{model_name}'. Prefix with provider e.g. 'gemini/{model_name}'.")
 
-        logger.warning(
-            f"Model '{model_name}' has no provider prefix; inferred '{provider}'. "
-            f"Prefer the explicit form '{provider}/{model_name}'."
-        )
+        logger.warning(f"Model '{model_name}' has no provider prefix; inferred '{provider}'.")
         return provider
 
     def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
-        # If the caller explicitly overrides the model, skip the fallback chain
         if 'model' in kwargs:
             kwargs['model'] = self.strip_routing_prefix(kwargs['model'])
             if self.model_instance is None:
@@ -150,41 +119,25 @@ class ModelRouter:
         for model_name in self._model_chain:
             start_time = time.time()
             try:
-                # Build a fresh provider for this model so cross-provider fallback works
                 provider = self._build_provider(model_name, self._original_module)
                 self.model_instance = provider
-
                 call_kwargs = {**kwargs, 'model': self.strip_routing_prefix(model_name)}
-
                 return provider.model_response(module, uploaded_file, **call_kwargs)
-
             except Exception as e:
                 duration = time.time() - start_time
                 last_exception = e
-                # Record the stripped name so a failed row matches the id a
-                # successful row on the same model would be recorded under.
-                cost_tracker.record_failed_attempt(
-                    module_name, self.strip_routing_prefix(model_name), duration, error=e
-                )
-                logger.warning(
-                    f"Model '{model_name}' failed after {duration:.2f}s; "
-                    f"trying next fallback if available. Error: {e}"
-                )
+                cost_tracker.record_failed_attempt(module_name, self.strip_routing_prefix(model_name), duration, error=e)
+                logger.warning(f"Model '{model_name}' failed after {duration:.2f}s; trying next fallback. Error: {e}")
                 continue
 
-        raise RuntimeError(
-            f"Failed to get response after trying all models in chain {self._model_chain}. "
-            f"Last model error: {last_exception}"
-        ) from last_exception
+        raise RuntimeError(f"Failed to get response after trying all models in chain {self._model_chain}. Last error: {last_exception}") from last_exception
 
     def _require_model_instance(self) -> LLMProvider:
         if self.model_instance is None:
             try:
                 self.model_instance = self._build_provider(self._model_chain[0], self._original_module)
             except Exception as e:
-                raise RuntimeError(
-                    f"Could not initialize primary model provider for '{self._model_chain[0]}': {e}"
-                ) from e
+                raise RuntimeError(f"Could not initialize primary model provider for '{self._model_chain[0]}': {e}") from e
         return self.model_instance
 
     def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:

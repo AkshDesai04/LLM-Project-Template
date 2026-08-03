@@ -1,8 +1,8 @@
 import os
 from core.llm_models.router import ModelRouter
 from core.modules.test_module import FileSummaryPrompt
-from utils.logger import get_logger
-from utils.parallel_executor import parallel_execute
+from utils.logging import get_logger
+from utils.concurrency import parallel_execute
 
 # Initialize logger for this test script
 logger = get_logger("TestFile")

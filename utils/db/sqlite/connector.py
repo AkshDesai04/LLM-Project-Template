@@ -1,15 +1,19 @@
 """
-SQLite Database Connector.
-
-Provides a thread-safe, lightweight connector for local SQLite databases
-or in-memory instances leveraging standard library sqlite3.
+SQLite Database Connector Implementation.
 """
 
 import contextlib
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from .base import BaseDatabaseConnector
+from utils.db.base import BaseDatabaseConnector
+from utils.db.sqlite.vector_handler import (
+    create_sqlite_vector_table,
+    insert_sqlite_vector,
+    insert_sqlite_vectors,
+    search_sqlite_vectors,
+    delete_sqlite_vector,
+)
 from utils.env import get_database_url, get_secret
 from utils.logging import get_logger
 
@@ -17,21 +21,9 @@ logger = get_logger("SQLiteConnector")
 
 
 class SQLiteConnector(BaseDatabaseConnector):
-    """
-    Connector for SQLite relational databases.
-
-    Primary configuration uses a single connection URL or path (SQLITE_URL, SQLITE_DB_PATH, or DATABASE_URL).
-    """
+    """Connector for SQLite relational databases with vector search support."""
 
     def __init__(self, db_path: Optional[str] = None, connection_string: Optional[str] = None, timeout: float = 10.0):
-        """
-        Initializes the SQLite connector configuration.
-
-        Args:
-            db_path: Path to .db file or ':memory:'. If None, resolves from connection URL / env vars.
-            connection_string: Connection URL e.g. 'sqlite:///path/to/db.sqlite'.
-            timeout: Command timeout in seconds.
-        """
         resolved_path = (
             db_path
             or connection_string
@@ -51,21 +43,17 @@ class SQLiteConnector(BaseDatabaseConnector):
         self._in_transaction: bool = False
 
     def connect(self) -> sqlite3.Connection:
-        """
-        Establishes connection to the SQLite database.
-
-        Returns:
-            sqlite3.Connection: Active SQLite connection.
-        """
         if self._connection is None:
             logger.info(f"Connecting to SQLite database at '{self.db_path}'...")
-            self._connection = sqlite3.connect(self.db_path, timeout=self.timeout)
+            if self.db_path == ":memory:":
+                self._connection = sqlite3.connect("file::memory:?cache=shared", uri=True, timeout=self.timeout)
+            else:
+                self._connection = sqlite3.connect(self.db_path, timeout=self.timeout)
             self._connection.row_factory = sqlite3.Row
             logger.info("Successfully connected to SQLite database.")
         return self._connection
 
     def close(self) -> None:
-        """Closes the active SQLite database connection."""
         if self._connection is not None:
             logger.info("Closing SQLite database connection...")
             self._connection.close()
@@ -73,12 +61,6 @@ class SQLiteConnector(BaseDatabaseConnector):
             logger.info("SQLite connection closed.")
 
     def is_connected(self) -> bool:
-        """
-        Checks whether the SQLite database connection is active.
-
-        Returns:
-            bool: True if connected and responsive, False otherwise.
-        """
         if self._connection is None:
             return False
         try:
@@ -87,48 +69,21 @@ class SQLiteConnector(BaseDatabaseConnector):
         except (sqlite3.Error, AttributeError):
             return False
 
-    def execute_query(
-        self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Executes a SELECT query and returns records as dictionaries.
-
-        Args:
-            query: SQL query.
-            params: Query parameters.
-
-        Returns:
-            List[Dict[str, Any]]: List of dictionary rows.
-        """
+    def execute_query(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         conn = self.connect()
-        params = params or ()
         try:
             cursor = conn.cursor()
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            cursor.execute(query, params or ())
+            return [dict(row) for row in cursor.fetchall()]
         except sqlite3.Error as e:
             logger.error(f"Failed to execute SQLite query: {e}")
             raise
 
-    def execute_non_query(
-        self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
-    ) -> int:
-        """
-        Executes an INSERT, UPDATE, DELETE, or DDL query.
-
-        Args:
-            query: SQL statement.
-            params: Bound parameters.
-
-        Returns:
-            int: Number of affected rows.
-        """
+    def execute_non_query(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> int:
         conn = self.connect()
-        params = params or ()
         try:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, params or ())
             if not self._in_transaction:
                 conn.commit()
             return cursor.rowcount
@@ -138,19 +93,7 @@ class SQLiteConnector(BaseDatabaseConnector):
             logger.error(f"Failed to execute SQLite non-query: {e}")
             raise
 
-    def execute_many(
-        self, query: str, params_list: List[Union[Tuple[Any, ...], Dict[str, Any]]]
-    ) -> int:
-        """
-        Executes a query repeatedly with parameter sets.
-
-        Args:
-            query: SQL statement template.
-            params_list: Sequence of parameters.
-
-        Returns:
-            int: Total affected rows count.
-        """
+    def execute_many(self, query: str, params_list: List[Union[Tuple[Any, ...], Dict[str, Any]]]) -> int:
         conn = self.connect()
         try:
             cursor = conn.cursor()
@@ -164,24 +107,11 @@ class SQLiteConnector(BaseDatabaseConnector):
             logger.error(f"Failed to execute SQLite executemany: {e}")
             raise
 
-    def fetch_one(
-        self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Executes a query and returns the first row as a dictionary.
-
-        Args:
-            query: SQL query.
-            params: Parameters to bind.
-
-        Returns:
-            Optional[Dict[str, Any]]: Single dictionary row or None.
-        """
+    def fetch_one(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
         conn = self.connect()
-        params = params or ()
         try:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, params or ())
             row = cursor.fetchone()
             return dict(row) if row else None
         except sqlite3.Error as e:
@@ -190,9 +120,6 @@ class SQLiteConnector(BaseDatabaseConnector):
 
     @contextlib.contextmanager
     def transaction(self):
-        """
-        Context manager for SQLite transaction safety.
-        """
         conn = self.connect()
         was_in_transaction = self._in_transaction
         self._in_transaction = True
@@ -206,3 +133,19 @@ class SQLiteConnector(BaseDatabaseConnector):
             raise
         finally:
             self._in_transaction = was_in_transaction
+
+    # Vector operations
+    def create_vector_table(self, table_name: str, vector_dim: int, distance_metric: str = "cosine") -> None:
+        create_sqlite_vector_table(self, table_name, vector_dim, distance_metric)
+
+    def insert_vector(self, table_name: str, vector_id: str, vector: List[float], metadata: Optional[Dict[str, Any]] = None) -> int:
+        return insert_sqlite_vector(self, table_name, vector_id, vector, metadata)
+
+    def insert_vectors(self, table_name: str, records: List[Dict[str, Any]]) -> int:
+        return insert_sqlite_vectors(self, table_name, records)
+
+    def vector_search(self, table_name: str, query_vector: List[float], top_k: int = 10, min_score: Optional[float] = None, distance_metric: str = "cosine") -> List[Dict[str, Any]]:
+        return search_sqlite_vectors(self, table_name, query_vector, top_k=top_k, min_score=min_score, distance_metric=distance_metric)
+
+    def delete_vector(self, table_name: str, vector_id: str) -> int:
+        return delete_sqlite_vector(self, table_name, vector_id)

@@ -1,8 +1,5 @@
 """
-Base Abstract Class for Database Connectors.
-
-Defines a common, interoperable interface across relational and document
-databases.
+Base Abstract Class for Database Connectors with Native Vector Search Support.
 """
 
 from abc import ABC, abstractmethod
@@ -19,105 +16,87 @@ class BaseDatabaseConnector(ABC):
     Abstract Base Class for all database connectors.
 
     Provides standard method signatures for connecting, executing queries,
-    fetching records, managing transactions, and closing connections cleanly.
+    fetching records, managing transactions, closing connections cleanly,
+    and performing vector search operations.
     """
 
     @abstractmethod
     def connect(self) -> Any:
-        """
-        Establishes connection to the database.
-
-        Returns:
-            The native connection or client object.
-        """
         pass
 
     @abstractmethod
     def close(self) -> None:
-        """Closes the active database connection or client session."""
         pass
 
     @abstractmethod
     def is_connected(self) -> bool:
-        """
-        Checks whether the database connection is currently active and healthy.
-
-        Returns:
-            bool: True if connected and responsive, False otherwise.
-        """
         pass
 
     @abstractmethod
     def execute_query(
         self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
     ) -> List[Dict[str, Any]]:
-        """
-        Executes a read/fetch query (e.g. SELECT) and returns all results as dictionaries.
-
-        Args:
-            query: The SQL or query string to execute.
-            params: Parameters to bind to the query.
-
-        Returns:
-            List[Dict[str, Any]]: A list of dictionaries representing result rows.
-        """
         pass
 
     @abstractmethod
     def execute_non_query(
         self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
     ) -> int:
-        """
-        Executes a write/mutation query (e.g. INSERT, UPDATE, DELETE, DDL).
-
-        Args:
-            query: The SQL or command string to execute.
-            params: Parameters to bind to the statement.
-
-        Returns:
-            int: The count of affected rows/records.
-        """
         pass
 
     @abstractmethod
     def execute_many(
         self, query: str, params_list: List[Union[Tuple[Any, ...], Dict[str, Any]]]
     ) -> int:
-        """
-        Executes a query repeatedly with a list of parameter sets.
-
-        Args:
-            query: The SQL query template.
-            params_list: Sequence of parameter tuples or dictionaries.
-
-        Returns:
-            int: Total number of affected rows/records across all executions.
-        """
         pass
 
     @abstractmethod
     def fetch_one(
         self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None
     ) -> Optional[Dict[str, Any]]:
-        """
-        Executes a query and returns the first row as a dictionary.
-
-        Args:
-            query: The SQL query string.
-            params: Parameters to bind to the query.
-
-        Returns:
-            Optional[Dict[str, Any]]: A dictionary representing the first result row, or None.
-        """
         pass
 
     @abstractmethod
     @contextlib.contextmanager
     def transaction(self):
+        pass
+
+    # Vector Storage & Search Operations
+
+    @abstractmethod
+    def create_vector_table(self, table_name: str, vector_dim: int, distance_metric: str = "cosine") -> None:
+        """Creates a table structured for storing vectors and metadata."""
+        pass
+
+    @abstractmethod
+    def insert_vector(
+        self, table_name: str, vector_id: str, vector: List[float], metadata: Optional[Dict[str, Any]] = None
+    ) -> int:
+        """Inserts or replaces a single vector record."""
+        pass
+
+    @abstractmethod
+    def insert_vectors(self, table_name: str, records: List[Dict[str, Any]]) -> int:
+        """Batch inserts multiple vector records."""
+        pass
+
+    @abstractmethod
+    def vector_search(
+        self,
+        table_name: str,
+        query_vector: List[float],
+        top_k: int = 10,
+        min_score: Optional[float] = None,
+        distance_metric: str = "cosine",
+    ) -> List[Dict[str, Any]]:
         """
-        Context manager for executing operations inside a transaction block.
-        Automatically commits changes on exit or rolls back on exception.
+        Executes vector similarity search using top_k and/or minimum score filtering.
         """
+        pass
+
+    @abstractmethod
+    def delete_vector(self, table_name: str, vector_id: str) -> int:
+        """Deletes a vector record by ID."""
         pass
 
     def __enter__(self):
