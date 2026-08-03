@@ -13,8 +13,15 @@ belongs in `core/` instead.
 | `file_ops.py` | Text, binary, prompt and CSV reads | `FileOps` |
 | `parallel_executor.py` | Thread-pool fan-out with retries and rate limiting | `ParallelExecutor` |
 | `markitdown_utils.py` | Document/URL/media → Markdown via MarkItDown | `MarkItDownUtils` |
+| `base_connector.py` | Abstract Base Class interface for database connectors | `BaseDatabaseConnector` |
+| `db_router.py` | Unified router/factory for resolving database connectors | `DatabaseRouter` |
+| `sqlite_connector.py` | SQLite3 database connector (std library) | `SQLiteConnector` |
+| `postgres_connector.py` | PostgreSQL database connector (psycopg2) | `PostgreSQLConnector` |
+| `mysql_connector.py` | MySQL database connector (pymysql) | `MySQLConnector` |
+| `mongo_connector.py` | MongoDB document connector (pymongo) | `MongoDBConnector` |
+| `oracle_connector.py` | OracleDB database connector (oracledb) | `OracleDBConnector` |
 
-`__init__.py` is empty. Import from the concrete module: `from utils.file_ops import read_csv`.
+Import directly from `utils`: `from utils import DatabaseRouter, SQLiteConnector, PostgreSQLConnector`.
 
 The dependency graph is a star. `logger.py` imports nothing local; the other four import
 only `utils.logger`. None of them import each other, so they can be used independently.
@@ -213,3 +220,52 @@ guard, so importing this module fails if `markitdown` is absent.
 
 The `__main__` block at the bottom references `./tests/test_files/0.pdf`, which does not
 exist in this repo, and uses a CWD-relative path — it will not run as written.
+
+---
+
+## Database Connectors
+
+A unified suite of database connectors providing interoperable interfaces for relational and document databases:
+
+### `BaseDatabaseConnector` (`utils/base_connector.py`)
+Abstract base class standardizing database interaction methods across all connectors:
+- `connect()` -> Connection object
+- `close()` -> None
+- `is_connected()` -> bool
+- `execute_query(query, params=None)` -> `list[dict]`
+- `execute_non_query(query, params=None)` -> `int` (affected rows)
+- `execute_many(query, params_list)` -> `int`
+- `fetch_one(query, params=None)` -> `dict | None`
+- `transaction()` -> Context manager for auto-commit/rollback
+- Context manager (`with Connector() as db:`) for automatic session cleanup
+
+### `DatabaseRouter` (`utils/db_router.py`)
+Unified factory and router for instantiating database connectors dynamically based on dialect name, alias, or connection URI.
+- Secret resolution: Connectors fetch credentials via `utils.env_ops.get_secret()` matching `KEY_LOCATION` (`LOCAL` or `AWS_SM`).
+- Dialect resolution: `DatabaseRouter.get_connector('postgres')`, `DatabaseRouter.get_connector('postgresql://user:pass@localhost/db')`, `DatabaseRouter.get_connector('sqlite')`, etc.
+
+### `SQLiteConnector` (`utils/sqlite_connector.py`)
+Lightweight local relational database connector leveraging standard library `sqlite3`.
+- Default database path: `:memory:` or resolved via `SQLITE_DB_PATH` / `DATABASE_URL`.
+- Uses `sqlite3.Row` row factory to format query outputs as dictionaries.
+
+### `PostgreSQLConnector` (`utils/postgres_connector.py`)
+PostgreSQL connector using `psycopg2`.
+- Resolves single connection URL via `POSTGRES_URL` or `DATABASE_URL`.
+- Uses `RealDictCursor` for dictionary output formatting.
+
+### `MySQLConnector` (`utils/mysql_connector.py`)
+MySQL connector using `pymysql`.
+- Resolves single connection URL via `MYSQL_URL` or `DATABASE_URL`.
+- Uses `DictCursor` for dictionary output formatting.
+
+### `MongoDBConnector` (`utils/mongo_connector.py`)
+MongoDB document connector using `pymongo`.
+- Resolves single connection URI via `MONGODB_URI`, `MONGODB_URL`, or `DATABASE_URL`.
+- Native document methods: `find_documents`, `insert_document`, `insert_many_documents`, `update_documents`, `delete_documents`, `count_documents`, `aggregate`.
+- Provides an interoperable `BaseDatabaseConnector` query facade.
+
+### `OracleDBConnector` (`utils/oracle_connector.py`)
+Oracle Database connector using modern `oracledb`.
+- Resolves single connection URL/DSN via `ORACLE_URL`, `ORACLE_DSN`, or `DATABASE_URL`.
+- Converts cursor column descriptions into lowercase dictionary keys.

@@ -5,8 +5,8 @@ from typing import Optional, List, Any, Union
 from pydantic import BaseModel
 from anthropic import Anthropic
 
-from utils.logger import get_logger
-from utils.env_ops import get_secret
+from utils.logging import get_logger
+from utils.env import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
 from ..reasoning import build_result, join_reasoning, resolve_return_reasoning

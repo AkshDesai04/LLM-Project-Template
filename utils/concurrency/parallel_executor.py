@@ -3,7 +3,7 @@ import time
 import threading
 import concurrent.futures
 from typing import Callable, List, Any, Optional, Union
-from utils.logger import get_logger
+from utils.logging import get_logger
 
 logger = get_logger("ParallelExecutor")
 
@@ -166,34 +166,3 @@ def parallel_execute(
     logger.info(f"Parallel execution finished in {duration:.2f}s.")
     return results
 
-# ==========================================
-# SAMPLE USAGE (Copy and uncomment to run)
-# ==========================================
-if __name__ == "__main__":
-    def sample_task(x, y):
-        # Simulate work
-        time.sleep(0.5)
-        if x == 2: # Simulate a failure to test retries
-            raise ValueError("Simulated error")
-        return x + y
-
-    # Data: List of argument tuples
-    input_data = [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]
-
-    print("Running parallel execution...")
-    output = parallel_execute(
-        target_function=sample_task,
-        data=input_data,
-        max_threads=-1,       # Use all CPU cores
-        max_req_per_min=600,  # Limit to ~10 req/sec
-        max_retries=2,        # Retry failed tasks twice
-        retry_timer=0.1
-    )
-
-    print("Results:")
-    for i, res in enumerate(output):
-        # Check for Exceptions to handle failures gracefully
-        if isinstance(res, Exception):
-            print(f"Index {i}: Task failed with error -> {res}")
-        else:
-            print(f"Index {i}: Success -> {res}")

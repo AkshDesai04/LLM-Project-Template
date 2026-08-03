@@ -1,10 +1,13 @@
 from core.modules.base import Base
-from utils.file_ops import read_prompt
+from utils.io import read_prompt
 
 
 class FileSummaryPrompt(Base):
-    prompt: str = read_prompt('test_prompt')
-    model: str = 'openai/o3-mini-2025-01-31'
+    prompt: str = ""
+    model: str = "openai/o3-mini-2025-01-31"
     stream: bool = False
-    # reasoning_budget: str = 'xhigh'
-    # return_reasoning = True
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        if not self.prompt:
+            self.prompt = read_prompt("test_prompt")

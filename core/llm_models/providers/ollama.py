@@ -6,8 +6,8 @@ from typing import Optional, List, Any, Union
 import ollama
 from ollama import Client
 
-from utils.logger import get_logger
-from utils.env_ops import get_secret
+from utils.logging import get_logger
+from utils.env import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
 from ..reasoning import (
@@ -279,14 +279,15 @@ class OllamaProvider(LLMProvider):
                 embeddings.append(resp['embedding'])
             
             total_duration = time.time() - start_time
+            prompt_tokens = sum(max(1, len(t) // 4) for t in input_texts)
             
-            costs = cost_tracker.calculate_cost(model, 0, 0)
+            costs = cost_tracker.calculate_cost(model, prompt_tokens, 0)
             cost_tracker.record_transaction(
                 "Embedding",
                 model,
                 costs,
                 total_duration,
-                input_tokens=0,
+                input_tokens=prompt_tokens,
                 output_tokens=0,
                 cached_tokens=0,
             )

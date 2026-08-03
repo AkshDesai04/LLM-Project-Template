@@ -1,8 +1,8 @@
 import time
 from typing import Any, Optional, List, Union
 
-from utils.logger import get_logger
-from utils.env_ops import get_secret
+from utils.logging import get_logger
+from utils.env import get_secret
 from ..base_provider import LLMProvider, JudgeResult
 from ..cost_tracker import cost_tracker
 from ..reasoning import (
@@ -106,10 +106,7 @@ class PerplexityProvider(LLMProvider):
                                 completion_tokens = getattr(u, 'completion_tokens', 0)
                                 total_duration = time.time() - start_time
                                 
-                                try:
-                                    costs = cost_tracker.calculate_cost(model, prompt_tokens, completion_tokens)
-                                except ValueError:
-                                    costs = {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
+                                costs = cost_tracker.calculate_cost(model, prompt_tokens, completion_tokens)
 
                                 cost_tracker.record_transaction(
                                     type(module).__name__,
@@ -148,10 +145,7 @@ class PerplexityProvider(LLMProvider):
                     prompt_tokens = getattr(usage, 'prompt_tokens', 0)
                     completion_tokens = getattr(usage, 'completion_tokens', 0)
                     
-                    try:
-                        costs = cost_tracker.calculate_cost(model, prompt_tokens, completion_tokens)
-                    except ValueError:
-                        costs = {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0, "total_cost": 0.0}
+                    costs = cost_tracker.calculate_cost(model, prompt_tokens, completion_tokens)
 
                     cost_tracker.record_transaction(
                         type(module).__name__,

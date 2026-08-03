@@ -1,7 +1,7 @@
 import time
 from typing import Any, Optional, List, Union
 
-from utils.logger import get_logger
+from utils.logging import get_logger
 from core.modules.base import Base as BaseModule
 from .base_provider import LLMProvider, JudgeResult
 from .cost_tracker import cost_tracker
@@ -118,7 +118,7 @@ class ModelRouter:
             provider = PROVIDER_ANTHROPIC
         elif model_name_lower.startswith(("sonar", "perplexity")):
             provider = PROVIDER_PERPLEXITY
-        elif model_name_lower.startswith(("mistral", "phi", "qwen")):
+        elif model_name_lower.startswith(("mistral", "phi", "qwen", "deepseek", "codestral", "command")):
             provider = PROVIDER_OLLAMA
         elif model_name_lower.startswith("llama"):
             provider = PROVIDER_PERPLEXITY

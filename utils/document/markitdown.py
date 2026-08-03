@@ -1,8 +1,15 @@
 import os
 from typing import Optional, Any
-from markitdown import MarkItDown
-from utils.logger import get_logger
 from urllib.parse import urlparse
+
+try:
+    from markitdown import MarkItDown
+    MARKITDOWN_AVAILABLE = True
+except ImportError:
+    MARKITDOWN_AVAILABLE = False
+    MarkItDown = None
+
+from utils.logging import get_logger
 
 logger = get_logger("MarkItDownUtils")
 
@@ -28,6 +35,11 @@ class MarkItDownUtils:
         """
         Initializes the MarkItDown converter.
         """
+        if not MARKITDOWN_AVAILABLE:
+            message = "markitdown is not installed. Please install 'markitdown' to use MarkItDownUtils."
+            logger.error(message)
+            raise ImportError(message)
+
         logger.info(f"Initializing MarkItDown utility (plugins={enable_plugins})...")
         self.md = MarkItDown(
             llm_client=llm_client, 
@@ -146,7 +158,6 @@ class MarkItDownUtils:
         """
         try:
             logger.info(f"Converting image: {image_path} (describe={describe})")
-            # Note: The generic convert() handles images, but we highlight it here.
             result = self.md.convert(image_path)
             return result.text_content
         except Exception as e:
@@ -171,6 +182,9 @@ class MarkItDownUtils:
             logger.error(f"Error converting audio {audio_path}: {e}")
             raise
 
-if __name__ == "__main__":
-    utils = MarkItDownUtils()
-    print(utils.convert("./tests/test_files/0.pdf"))
+
+def convert_to_markdown(source: str, **kwargs) -> str:
+    """Helper function to convert a source to markdown using default MarkItDownUtils."""
+    converter = MarkItDownUtils(**kwargs)
+    return converter.convert(source)
+
