@@ -13,7 +13,7 @@ Organized into domain-specific subpackages:
 import sys
 
 # Subpackage imports
-from utils import concurrency, db, document, env, io, logging
+from utils import concurrency, db, document, env, io, logging, s3
 
 # Re-exports for top-level convenience
 from utils.concurrency import ThreadSafeRateLimiter, parallel_execute
@@ -38,6 +38,17 @@ from utils.env import (
 )
 from utils.io import get_file, read_csv, read_file, read_prompt
 from utils.logging import JsonFormatter, LambdaLogger, get_logger, get_logging_level, get_logging_mode
+from utils.s3 import (
+    S3Client,
+    delete_file,
+    download_bytes,
+    download_file,
+    file_exists,
+    generate_presigned_url,
+    list_objects,
+    upload_bytes,
+    upload_file,
+)
 
 # Backward-compatibility module aliases for legacy import paths
 sys.modules["utils.logger"] = logging.logger
@@ -50,6 +61,7 @@ sys.modules["utils.db_router"] = db.router
 sys.modules["utils.mysql_connector"] = db.mysql.connector
 sys.modules["utils.postgres_connector"] = db.postgres.connector
 sys.modules["utils.sqlite_connector"] = db.sqlite.connector
+sys.modules["utils.s3_ops"] = s3.s3_ops
 
 __all__ = [
     # Subpackages
@@ -59,6 +71,7 @@ __all__ = [
     "io",
     "concurrency",
     "document",
+    "s3",
     # Connectors & Router
     "BaseDatabaseConnector",
     "DatabaseRouter",
@@ -92,4 +105,15 @@ __all__ = [
     # Document
     "MarkItDownUtils",
     "convert_to_markdown",
+    # S3
+    "S3Client",
+    "upload_file",
+    "upload_bytes",
+    "download_file",
+    "download_bytes",
+    "generate_presigned_url",
+    "file_exists",
+    "delete_file",
+    "list_objects",
 ]
+
