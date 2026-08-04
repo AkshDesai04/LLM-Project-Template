@@ -2,8 +2,9 @@
 # Environment & Configuration
 # ============================================
 
-# env_ops
+# env_ops & s3_ops
 boto3==1.42.45
+
 python-dotenv==1.2.2
 
 
