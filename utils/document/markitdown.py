@@ -113,11 +113,12 @@ class MarkItDownUtils:
             import ipaddress
             try:
                 ip = ipaddress.ip_address(hostname)
-                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-                    raise ValueError(f"Invalid or restricted IP address provided: '{hostname}'.")
+                is_ip = True
             except ValueError:
-                # hostname is a DNS name, not a raw IP
-                pass
+                is_ip = False
+
+            if is_ip and (ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local):
+                raise ValueError(f"Invalid or restricted IP address provided: '{hostname}'.")
 
             logger.info(f"Converting URL: {url}")
             result = self.md.convert_url(url)
