@@ -79,18 +79,20 @@ def print_summary_table(
     print("=" * table_width + "\n")
 
     try:
-        logger.info({"session_history": call_history})
-        logger.info({
-            "session_totals": {
-                "input_cost": total_input_cost,
-                "output_cost": total_output_cost,
-                "cached_cost": total_cached_cost,
-                "overall_cost": total_overall_cost,
-                "input_tokens": total_input_tokens,
-                "output_tokens": total_output_tokens,
-                "cached_tokens": total_cached_tokens,
-                "overall_duration": total_duration
-            }
-        })
+        import sys
+        if not sys.stdout.closed:
+            logger.info({"session_history": call_history})
+            logger.info({
+                "session_totals": {
+                    "input_cost": total_input_cost,
+                    "output_cost": total_output_cost,
+                    "cached_cost": total_cached_cost,
+                    "overall_cost": total_overall_cost,
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                    "cached_tokens": total_cached_tokens,
+                    "overall_duration": total_duration
+                }
+            })
     except Exception:
         pass
