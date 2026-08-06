@@ -49,7 +49,15 @@ class OllamaProvider(LLMProvider):
             start_time = time.time()
 
             for t in input_texts:
-                resp = self.client.embeddings(model=model, prompt=t)
+                try:
+                    resp = self.client.embeddings(model=model, prompt=t)
+                except Exception as err:
+                    if getattr(err, 'status_code', None) == 404 or 'not found' in str(err).lower():
+                        logger.info(f"Embedding model '{model}' not found locally. Attempting to pull from Ollama Hub...")
+                        self.client.pull(model)
+                        resp = self.client.embeddings(model=model, prompt=t)
+                    else:
+                        raise
                 embeddings.append(resp['embedding'])
 
             total_duration = time.time() - start_time

@@ -84,13 +84,19 @@ class GeminiProvider(LLMProvider):
         **kwargs
     ) -> Union[List[float], List[List[float]]]:
         try:
-            model = model or self.model_name
+            raw_model = model or self.model_name
+            target_model = raw_model.split("/")[-1] if "/" in raw_model else raw_model
+            if not target_model.startswith("models/"):
+                target_model = f"models/{target_model}"
             input_texts = [text] if isinstance(text, str) else text
             start_time = time.time()
+            embed_config = types.EmbedContentConfig(task_type=task_type)
+            if dimensions and dimensions > 0:
+                embed_config.output_dimensionality = dimensions
             result = self.client.models.embed_content(
-                model=model,
+                model=target_model,
                 contents=input_texts,
-                config=types.EmbedContentConfig(task_type=task_type, output_dimensionality=dimensions)
+                config=embed_config
             )
             total_duration = time.time() - start_time
 

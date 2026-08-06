@@ -79,7 +79,7 @@ def generate_gemini_response(provider: Any, module: Any, uploaded_file: Optional
             thinking_config_obj = None
             if reasoning_budget:
                 if isinstance(reasoning_budget, str):
-                    reasoning = ThinkingLevel(reasoning_budget)
+                    reasoning = ThinkingLevel(reasoning_budget.upper())
                     thinking_config_obj = types.ThinkingConfig(include_thoughts=True, thinking_level=reasoning)
                 else:
                     thinking_config_obj = types.ThinkingConfig(include_thoughts=True)
@@ -158,6 +158,16 @@ def generate_gemini_response(provider: Any, module: Any, uploaded_file: Optional
 
         except Exception as e:
             last_exception = e
+            err_msg = str(e).lower()
+            if ("thinking" in err_msg) and (reasoning_budget or return_reasoning):
+                logger.warning(f"Model '{model}' issue with thinking config ({e}). Disabling thinking config and retrying.")
+                reasoning_budget = None
+                return_reasoning = False
+                continue
+            if ("invalid_argument" in err_msg or "invalid argument" in err_msg) and structure is None and response_mime_type == "application/json":
+                logger.warning(f"Model '{model}' invalid argument with application/json without schema ({e}). Retrying with text/plain.")
+                response_mime_type = "text/plain"
+                continue
             logger.warning(f"Gemini response failed on attempt {attempt + 1} for model {model}: {e}")
             time.sleep(DEFAULT_RETRY_SLEEP_SECONDS)
             continue
