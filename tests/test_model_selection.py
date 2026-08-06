@@ -1,3 +1,5 @@
+import pytest
+
 from core.modules.base import Base
 from core.llm_models.router import ModelRouter
 
@@ -16,6 +18,8 @@ class CustomModuleOnlyModel(Base):
     models: list[str] = []
 
 
+@pytest.mark.llm
+@pytest.mark.unit
 def test_base_defaults():
     module = Base()
     assert module.model is None
@@ -34,6 +38,8 @@ def test_base_defaults():
     ]
 
 
+@pytest.mark.llm
+@pytest.mark.unit
 def test_only_models_given():
     module = CustomModuleOnlyModels()
     router = ModelRouter(module)
@@ -45,6 +51,8 @@ def test_only_models_given():
     ]
 
 
+@pytest.mark.llm
+@pytest.mark.unit
 def test_both_model_and_models_given():
     module = CustomModuleBoth()
     router = ModelRouter(module)
@@ -56,6 +64,8 @@ def test_both_model_and_models_given():
     ]
 
 
+@pytest.mark.llm
+@pytest.mark.unit
 def test_only_model_given():
     module = CustomModuleOnlyModel()
     router = ModelRouter(module)
@@ -63,6 +73,8 @@ def test_only_model_given():
     assert router._model_chain == ["ollama/llama3"]
 
 
+@pytest.mark.llm
+@pytest.mark.unit
 def test_neither_model_nor_models_raises_error():
     class EmptyModule(Base):
         model: str | None = None
@@ -76,6 +88,8 @@ def test_neither_model_nor_models_raises_error():
         assert "Module must specify at least 'model' or 'models'" in str(e)
 
 
+@pytest.mark.llm
+@pytest.mark.unit
 def test_model_prepending_without_deduplication():
     class DuplicateModule(Base):
         model: str = "openai/gpt-4o"

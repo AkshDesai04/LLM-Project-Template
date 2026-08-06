@@ -26,6 +26,8 @@ def mock_boto3_client():
         yield mock_s3
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_s3_client_lambda_mode(mock_boto3_client):
     with patch("utils.s3.client.get_logging_mode", return_value="LAMBDA"):
         client = S3Client(bucket_name="test-bucket", region_name="us-east-1")
@@ -33,6 +35,8 @@ def test_s3_client_lambda_mode(mock_boto3_client):
         assert client.client == mock_boto3_client
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_s3_client_normal_mode(mock_boto3_client):
     with patch("utils.s3.client.get_logging_mode", return_value="NORMAL"), patch(
         "utils.s3.client.get_secret"
@@ -48,6 +52,8 @@ def test_s3_client_normal_mode(mock_boto3_client):
         assert client.default_bucket == "env-bucket"
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_upload_file(mock_boto3_client):
     with patch("utils.s3.client.get_logging_mode", return_value="LAMBDA"):
         client = S3Client(bucket_name="my-bucket")
@@ -61,6 +67,8 @@ def test_upload_file(mock_boto3_client):
         )
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_upload_bytes(mock_boto3_client):
     with patch("utils.s3.client.get_logging_mode", return_value="LAMBDA"):
         client = S3Client(bucket_name="my-bucket")
@@ -71,6 +79,8 @@ def test_upload_bytes(mock_boto3_client):
         )
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_download_file(mock_boto3_client, tmp_path):
     dest_path = str(tmp_path / "downloaded.txt")
     with patch("utils.s3.client.get_logging_mode", return_value="LAMBDA"):
@@ -82,6 +92,8 @@ def test_download_file(mock_boto3_client, tmp_path):
         )
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_download_bytes(mock_boto3_client):
     mock_body = MagicMock()
     mock_body.read.return_value = b"sample content"
@@ -96,6 +108,8 @@ def test_download_bytes(mock_boto3_client):
         )
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_generate_presigned_url(mock_boto3_client):
     mock_boto3_client.generate_presigned_url.return_value = "https://s3.amazonaws.com/signed-url"
     with patch("utils.s3.client.get_logging_mode", return_value="LAMBDA"):
@@ -109,6 +123,8 @@ def test_generate_presigned_url(mock_boto3_client):
         )
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_file_exists_true_and_false(mock_boto3_client):
     with patch("utils.s3.client.get_logging_mode", return_value="LAMBDA"):
         client = S3Client(bucket_name="my-bucket")
@@ -124,6 +140,8 @@ def test_file_exists_true_and_false(mock_boto3_client):
         assert client.file_exists("missing.txt") is False
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_delete_file(mock_boto3_client):
     with patch("utils.s3.client.get_logging_mode", return_value="LAMBDA"):
         client = S3Client(bucket_name="my-bucket")
@@ -133,6 +151,8 @@ def test_delete_file(mock_boto3_client):
         )
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_list_objects(mock_boto3_client):
     mock_boto3_client.list_objects_v2.return_value = {
         "Contents": [{"Key": "folder/a.txt"}, {"Key": "folder/b.txt"}]
@@ -146,6 +166,8 @@ def test_list_objects(mock_boto3_client):
         )
 
 
+@pytest.mark.s3
+@pytest.mark.unit
 def test_top_level_convenience_functions(mock_boto3_client):
     with patch("utils.s3.client.get_logging_mode", return_value="LAMBDA"), patch(
         "utils.s3.s3_ops._default_client", None

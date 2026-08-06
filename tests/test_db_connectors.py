@@ -5,6 +5,8 @@ Verifies exports, single connection URL resolution, SQLite functional operations
 vector search (top_k and min_score filtering), context managers, and DatabaseRouter.
 """
 
+import pytest
+
 from utils import (
     BaseDatabaseConnector,
     DatabaseRouter,
@@ -14,6 +16,8 @@ from utils import (
 )
 
 
+@pytest.mark.db
+@pytest.mark.unit
 def test_exports():
     """Verify all database connectors export correctly from utils."""
     assert issubclass(SQLiteConnector, BaseDatabaseConnector)
@@ -21,6 +25,8 @@ def test_exports():
     assert issubclass(MySQLConnector, BaseDatabaseConnector)
 
 
+@pytest.mark.db
+@pytest.mark.unit
 def test_sqlite_functional():
     """Test full functional lifecycle of SQLiteConnector using an in-memory database."""
     with SQLiteConnector(db_path=":memory:") as db:
@@ -73,6 +79,8 @@ def test_sqlite_functional():
     assert db.is_connected() is False
 
 
+@pytest.mark.db
+@pytest.mark.unit
 def test_sqlite_vector_search():
     """Test vector table creation, insertion, top_k, min_score filtering, and deletion."""
     with SQLiteConnector(db_path=":memory:") as db:
@@ -113,6 +121,8 @@ def test_sqlite_vector_search():
         assert "vec_1" not in {r["id"] for r in results_after_delete}
 
 
+@pytest.mark.db
+@pytest.mark.unit
 def test_postgres_url_configuration():
     """Verify PostgreSQLConnector connection URL resolution."""
     url_conn = PostgreSQLConnector(connection_string="postgresql://user:pass@localhost:5432/db")
@@ -120,6 +130,8 @@ def test_postgres_url_configuration():
     assert url_conn.is_connected() is False
 
 
+@pytest.mark.db
+@pytest.mark.unit
 def test_mysql_url_configuration():
     """Verify MySQLConnector connection URL resolution."""
     url_conn = MySQLConnector(connection_string="mysql://myuser:mypass@127.0.0.1:3306/mydb")
@@ -127,6 +139,8 @@ def test_mysql_url_configuration():
     assert url_conn.is_connected() is False
 
 
+@pytest.mark.db
+@pytest.mark.unit
 def test_database_router():
     """Verify DatabaseRouter resolves connectors dynamically by single connection URL and dialect."""
     sqlite_conn = DatabaseRouter.get_connector("sqlite", db_path=":memory:")
