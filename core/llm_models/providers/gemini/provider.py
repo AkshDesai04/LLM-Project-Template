@@ -112,10 +112,10 @@ class GeminiProvider(LLMProvider):
                     pass
 
             if prompt_tokens > 0:
-                costs = cost_tracker.calculate_cost(model, prompt_tokens, 0, 0)
+                costs = cost_tracker.calculate_cost(raw_model, prompt_tokens, 0, 0)
                 cost_tracker.record_transaction(
                     "Embedding",
-                    model,
+                    raw_model,
                     costs,
                     total_duration,
                     input_tokens=prompt_tokens,

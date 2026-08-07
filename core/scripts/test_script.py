@@ -1,5 +1,5 @@
 import os
-from core.llm_models.router import ModelRouter
+from core.llm_models.router import router_response
 from core.modules.test_module import FileSummaryPrompt
 from utils.logging import get_logger
 from utils.concurrency import parallel_execute
@@ -23,8 +23,7 @@ def run_llm_call(index: int):
     logger.info(f"Starting parallel call #{index}")
     try:
         prompt_module = FileSummaryPrompt()
-        router = ModelRouter(prompt_module)
-        response = router.model_response(prompt_module)
+        response = router_response(prompt_module)
         
         # Ensure response is treated as text
         full_response_text = str(response)
