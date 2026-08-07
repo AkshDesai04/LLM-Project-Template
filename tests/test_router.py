@@ -6,7 +6,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from core.llm_models.base_provider import LLMProvider
-from core.llm_models.router import ModelRouter
+from core.llm_models.router import (
+    ModelRouter,
+    router_response,
+    model_response,
+    upload_media,
+    embed_content,
+    evaluate_response,
+)
 from core.modules.base import Base
 
 
@@ -49,8 +56,7 @@ def test_router_fallback_chain_success():
         return mock_gemini
 
     with patch.object(ModelRouter, "_build_provider", side_effect=mock_build):
-        router = ModelRouter(module)
-        res = router.model_response(module)
+        res = router_response(module)
         assert res == "Gemini Fallback Success"
 
 
@@ -66,9 +72,8 @@ def test_router_all_models_fail():
     mock_fail.model_response.side_effect = RuntimeError("All failed")
 
     with patch.object(ModelRouter, "_build_provider", return_value=mock_fail):
-        router = ModelRouter(module)
         with pytest.raises(RuntimeError, match="Failed to get response after trying all models"):
-            router.model_response(module)
+            router_response(module)
 
 
 @pytest.mark.llm
@@ -84,7 +89,22 @@ def test_router_delegation():
     mock_provider.evaluate_response.return_value = "judge_res"
 
     with patch.object(ModelRouter, "_build_provider", return_value=mock_provider):
-        router = ModelRouter(module)
-        assert router.upload_media(b"bytes", "image/png") == "media_ref"
-        assert router.embed_content("text") == [0.1, 0.2]
-        assert router.evaluate_response("p", "o") == "judge_res"
+        assert upload_media(module, b"bytes", "image/png") == "media_ref"
+        assert embed_content(module, "text") == [0.1, 0.2]
+        assert evaluate_response(module, "p", "o") == "judge_res"
+
+
+@pytest.mark.llm
+@pytest.mark.unit
+def test_top_level_router_response():
+    class TestModule(Base):
+        model: str = "gemini/gemini-2.5-flash"
+
+    module = TestModule()
+    mock_provider = MagicMock(spec=LLMProvider)
+    mock_provider.model_response.return_value = "Direct call response"
+
+    with patch.object(ModelRouter, "_build_provider", return_value=mock_provider):
+        assert router_response(module) == "Direct call response"
+        assert model_response(module) == "Direct call response"
+

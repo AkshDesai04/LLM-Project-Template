@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from utils.logging import get_logger
 from core.modules.base import Base
-from core.llm_models.router import ModelRouter
+from core.llm_models.router import router_response, embed_content
 
 logger = get_logger("OllamaTestCases")
 
@@ -46,8 +46,7 @@ class QwenVisionPrompt(Base):
 def test_text_generation() -> bool:
     logger.info("=== 1. Testing Text Generation (ollama/qwen3.5:2b) ===")
     module = QwenTextPrompt()
-    router = ModelRouter(module)
-    res = router.model_response(module)
+    res = router_response(module)
     logger.info(f"Response: {res}")
     return isinstance(res, str) and len(res) > 0
 
@@ -55,8 +54,7 @@ def test_text_generation() -> bool:
 def test_structured_output() -> bool:
     logger.info("=== 2. Testing Structured JSON Output (ollama/qwen3.5:2b) ===")
     module = QwenStructuredPrompt()
-    router = ModelRouter(module)
-    res = router.model_response(module)
+    res = router_response(module)
     logger.info(f"Structured Output: {res}")
     return isinstance(res, PlanetInfo) and res.name.lower() == "mars"
 
@@ -64,8 +62,7 @@ def test_structured_output() -> bool:
 def test_streaming_output() -> List[str]:
     logger.info("=== 3. Testing Streaming Output (ollama/qwen3.5:2b) ===")
     module = QwenTextPrompt(stream=True)
-    router = ModelRouter(module)
-    stream_gen = router.model_response(module)
+    stream_gen = router_response(module)
     chunks = []
     for chunk in stream_gen:
         text = chunk['message']['content'] if isinstance(chunk, dict) else str(chunk)
@@ -84,8 +81,7 @@ def test_vision_multimodal() -> bool:
         }
     }
     module = QwenVisionPrompt()
-    router = ModelRouter(module)
-    res = router.model_response(module, uploaded_file=dummy_image)
+    res = router_response(module, uploaded_file=dummy_image)
     logger.info(f"Vision Response: {res}")
     return isinstance(res, str) and len(res) > 0
 
@@ -97,8 +93,7 @@ def test_embedding() -> bool:
         models: list[str] = []
 
     module = EmbedModule()
-    router = ModelRouter(module)
-    vector = router.embed_content("Hello Ollama Embeddings")
+    vector = embed_content(module, "Hello Ollama Embeddings")
     logger.info(f"Generated vector embedding of length {len(vector)}")
     return isinstance(vector, list) and len(vector) > 0
 
@@ -111,7 +106,7 @@ def test_missing_model_download() -> bool:
         models: list[str] = []
 
     module = DownloadTestModule()
-    router = ModelRouter(module)
-    res = router.model_response(module)
+    res = router_response(module)
     logger.info(f"Response after auto-downloading gemma3:1b: {res}")
     return isinstance(res, str) and len(res) > 0
+

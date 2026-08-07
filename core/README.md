@@ -25,7 +25,7 @@ core/llm_models/  HOW to send it  - provider selection, retries, fallback, cost
 core/prompts/     the prompt text
 ```
 
-A module is a Pydantic object. You hand it to `ModelRouter`, which resolves the provider
+A module is a Pydantic object. You hand it to `router_response`, which resolves the provider
 from the model name, constructs the right SDK client, and calls it — falling back down a
 chain if anything fails.
 
@@ -33,7 +33,7 @@ chain if anything fails.
 
 ```python
 from core.modules.base import Base
-from core.llm_models.router import ModelRouter
+from core.llm_models.router import router_response, upload_media
 
 class SummarisePrompt(Base):
     prompt: str = "Summarise the following document."
@@ -41,8 +41,7 @@ class SummarisePrompt(Base):
     models: list[str] = ["openai/gpt-4o-mini"]
 
 module = SummarisePrompt()
-router = ModelRouter(module)
-print(router.model_response(module))
+print(router_response(module))
 ```
 
 With a file attached:
@@ -50,13 +49,13 @@ With a file attached:
 ```python
 from utils.file_ops import get_file
 
-media = router.upload_media(get_file("report.pdf"), "application/pdf")
-print(router.model_response(module, uploaded_file=media))
+media = upload_media(module, get_file("report.pdf"), "application/pdf")
+print(router_response(module, uploaded_file=media))
 ```
 
 ## Two rules
 
-**1. Always go through `ModelRouter`.** Never instantiate a provider directly. The
+**1. Always go through `router_response` or `ModelRouter`.** Never instantiate a provider directly. The
 router is what gives you the fallback chain, and it imports SDKs lazily — so you do not
 need every provider's package installed to use one of them.
 

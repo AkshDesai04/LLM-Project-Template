@@ -17,7 +17,7 @@ never hardcode them.
 
 ```python
 from core.modules.base import Base
-from core.llm_models.router import ModelRouter
+from core.llm_models.router import router_response
 
 class SummarisePrompt(Base):
     prompt: str = "Summarise the following document."
@@ -26,12 +26,10 @@ class SummarisePrompt(Base):
     temperature: float = 0.0
 
 module = SummarisePrompt()
-response = ModelRouter(module).model_response(module)
+response = router_response(module)
 ```
 
-Note the module is passed **twice** — once to build the router and once to the call.
-The first determines the model chain, the second supplies the prompt and per-call
-settings.
+The router automatically extracts the model fallback chain and per-call settings from the module object.
 
 ## Model naming
 
