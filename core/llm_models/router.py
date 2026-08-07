@@ -1,167 +1,192 @@
+import time
 from typing import Any, Optional, List, Union
 
-from utils.logger import get_logger
-from utils.env_ops import get_local_secret
+from utils.logging import get_logger
 from core.modules.base import Base as BaseModule
-from .base_provider import LLMProvider, JudgeResult
+from core.llm_models.base_provider import LLMProvider, JudgeResult
+from core.llm_models.cost_tracker import cost_tracker
+from core.llm_models.model_names import PROVIDER_ALIASES, split_model_name
 
 logger = get_logger("ModelRouter")
 
+PROVIDER_GOOGLE = "google"
+PROVIDER_OPENAI = "openai"
+PROVIDER_ANTHROPIC = "anthropic"
+PROVIDER_PERPLEXITY = "perplexity"
+PROVIDER_OLLAMA = "ollama"
+PROVIDER_VLLM = "vllm"
+DEFAULT_FALLBACK_INDEX = 0
+
+
 class ModelRouter:
-    def __init__(self, module: BaseModule, api_keys: Optional[dict] = None, fallback_index: int = 0):
-        model_name = ""
-        if fallback_index == 0:
-            model_name = module.model
-        else:
-            fall_back_models = getattr(module, 'fall_back_models', None)
-            if not fall_back_models:
-                raise ValueError("fallback_index is non-zero, but no fallback models are defined.")
-            try:
-                model_name = fall_back_models[fallback_index - 1]
-            except IndexError:
-                raise ValueError(f"Fallback index {fallback_index} is out of range.")
+    def __init__(self, module: Optional[BaseModule] = None, fallback_index: int = DEFAULT_FALLBACK_INDEX):
+        self._default_module = module
+        self._default_fallback_index = fallback_index
+        if module is not None:
+            _ = self.extract_model_chain(module, fallback_index)
 
-        module_for_init = module.model_copy(update={'model': model_name})
-        
+    @staticmethod
+    def extract_model_chain(module: BaseModule, fallback_index: int = DEFAULT_FALLBACK_INDEX) -> List[str]:
+        model = getattr(module, 'model', None)
+        models = getattr(module, 'models', None)
+
+        chain = list(models) if models is not None else []
+        if model:
+            chain.insert(0, model)
+
+        if not chain:
+            raise ValueError("Module must specify at least 'model' or 'models'.")
+
+        if fallback_index < 0 or fallback_index >= len(chain):
+            raise ValueError(f"Fallback index {fallback_index} is out of range for chain of length {len(chain)}.")
+
+        return chain[fallback_index:]
+
+    @property
+    def _model_chain(self) -> List[str]:
+        if self._default_module is None:
+            raise ValueError("No default module specified for this router instance.")
+        return self.extract_model_chain(self._default_module, self._default_fallback_index)
+
+    @staticmethod
+    def strip_routing_prefix(model_name: str) -> str:
+        return split_model_name(model_name)[1]
+
+    def _build_provider(self, model_name: str, module: BaseModule) -> LLMProvider:
         provider = self.get_provider_by_model_name(model_name)
-        model_name_lower = model_name.lower()
+        stripped_model_name = self.strip_routing_prefix(model_name)
+        module_for_init = module.model_copy(update={'model': stripped_model_name})
 
-        # Strip provider prefix if present (e.g., 'ollama/llama3.2:1b' -> 'llama3.2:1b')
-        if "/" in model_name:
-            # Currently only ollama/ is supported for stripping this way in this router
-            if model_name_lower.startswith("ollama/"):
-                model_name = model_name.split("/", 1)[1]
-                module_for_init = module.model_copy(update={'model': model_name})
+        logger.info(f"Routing to provider: '{provider}' for model '{stripped_model_name}'")
 
-        logger.info(f"Routing to provider: {provider} for model '{model_name}'")
+        try:
+            if provider == PROVIDER_GOOGLE:
+                from core.llm_models.providers.gemini import GeminiProvider
+                return GeminiProvider(None, LLMProvider.prepare_module(module_for_init))
+            if provider == PROVIDER_OPENAI:
+                from core.llm_models.providers.openai import OpenAIProvider
+                return OpenAIProvider(None, LLMProvider.prepare_module(module_for_init))
+            if provider == PROVIDER_ANTHROPIC:
+                from core.llm_models.providers.anthropic import AnthropicProvider
+                return AnthropicProvider(None, LLMProvider.prepare_module(module_for_init))
+            if provider == PROVIDER_PERPLEXITY:
+                from core.llm_models.providers.perplexity import PerplexityProvider
+                return PerplexityProvider(None, LLMProvider.prepare_module(module_for_init))
+            if provider == PROVIDER_OLLAMA:
+                from core.llm_models.providers.ollama import OllamaProvider
+                return OllamaProvider(None, LLMProvider.prepare_module(module_for_init))
+            if provider == PROVIDER_VLLM:
+                from core.llm_models.providers.vllm import VLLMProvider
+                return VLLMProvider(None, LLMProvider.prepare_module(module_for_init))
 
-        self.model_instance: LLMProvider
-        
-        # Lazy load providers to avoid importing SDKs if not needed
-        if provider == 'google':
-            api_key = get_local_secret("GEMINI_KEY", raise_error=False)
-            if not api_key and api_keys:
-                api_key = api_keys.get("GEMINI_KEY")
-            
-            if not api_key:
-                raise ValueError("Provider is 'google', but GEMINI_KEY not in .env or api_keys.")
-            from .providers.gemini import GeminiProvider
-            self.model_instance = GeminiProvider(api_key, LLMProvider.prepare_module(module_for_init))
-            
-        elif provider == 'openai':
-            api_key = get_local_secret("OPEN_AI_KEY", raise_error=False)
-            if not api_key and api_keys:
-                api_key = api_keys.get("OPEN_AI_KEY")
-
-            if not api_key:
-                raise ValueError("Provider is 'openai', but OPEN_AI_KEY not in .env or api_keys.")
-            from .providers.openai import OpenAIProvider
-            self.model_instance = OpenAIProvider(api_key, LLMProvider.prepare_module(module_for_init))
-            
-        elif provider == 'perplexity':
-            api_key = get_local_secret("PERPLEXITY_KEY", raise_error=False)
-            if not api_key and api_keys:
-                api_key = api_keys.get("PERPLEXITY_KEY")
-
-            if not api_key:
-                raise ValueError("Provider is 'perplexity', but PERPLEXITY_KEY not in .env or api_keys.")
-            from .providers.perplexity import PerplexityProvider
-            self.model_instance = PerplexityProvider(api_key, LLMProvider.prepare_module(module_for_init))
-            
-        elif provider == 'ollama':
-            # Ollama usually doesn't need an API key, but we'll use a placeholder if not provided
-            api_key = get_local_secret("OLLAMA_KEY", raise_error=False) or "local-key"
-            from .providers.ollama import OllamaProvider
-            self.model_instance = OllamaProvider(api_key, LLMProvider.prepare_module(module_for_init))
-            
-        else:
-            raise ValueError(f"Unsupported provider: '{provider}'")
+            raise ValueError(f"Unsupported provider: '{provider}' for model '{model_name}'.")
+        except Exception as e:
+            logger.error(f"Failed to build provider '{provider}' for model '{model_name}': {e}")
+            raise
 
     @staticmethod
     def get_provider_by_model_name(model_name: str) -> str:
-        """Determines the model provider based on the model name prefix."""
-        model_name_lower = model_name.lower()
-        if model_name_lower.startswith("ollama/"):
-            return "ollama"
-        if model_name_lower.startswith("gpt"):
-            return "openai"
-        elif model_name_lower.startswith("gemini"):
-            return "google"
-        elif model_name_lower.startswith(("o1", "o3", "gpt-5")):
-            return "openai"
-        elif model_name_lower.startswith(("sonar", "perplexity")):
-            return "perplexity"
-        elif model_name_lower.startswith(("ollama", "mistral", "phi", "qwen")):
-            return "ollama"
-        elif model_name_lower.startswith("llama"):
-            # Default llama to perplexity for backward compatibility, 
-            # unless it's explicitly prefixed with ollama elsewhere.
-            return "perplexity"
-        
-        raise ValueError(f"Could not determine provider for model '{model_name}'. "
-                         f"Model name should start with 'gpt', 'gemini', 'sonar', or 'ollama'.")
+        provider, _ = split_model_name(model_name)
+        if provider:
+            return provider
+        return ModelRouter._infer_provider_from_bare_name(model_name)
 
-    def model_response(self, module: Any, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
+    @staticmethod
+    def _infer_provider_from_bare_name(model_name: str) -> str:
+        name = model_name.lower()
+        if name.startswith(("gpt", "o1", "o3", "o4")):
+            provider = PROVIDER_OPENAI
+        elif name.startswith("gemini"):
+            provider = PROVIDER_GOOGLE
+        elif name.startswith(("claude", "anthropic")):
+            provider = PROVIDER_ANTHROPIC
+        elif name.startswith(("sonar", "perplexity")):
+            provider = PROVIDER_PERPLEXITY
+        elif name.startswith(("mistral", "phi", "qwen", "deepseek", "codestral", "command")):
+            provider = PROVIDER_OLLAMA
+        elif name.startswith("llama"):
+            provider = PROVIDER_PERPLEXITY
+        else:
+            raise ValueError(f"Could not determine provider for model '{model_name}'. Prefix with provider e.g. 'gemini/{model_name}'.")
+
+        logger.warning(f"Model '{model_name}' has no provider prefix; inferred '{provider}'.")
+        return provider
+
+    def model_response(self, module: Optional[BaseModule] = None, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
+        target_module = module if module is not None else self._default_module
+        if target_module is None:
+            raise ValueError("A prompt module must be provided.")
+
+        fallback_idx = kwargs.pop('fallback_index', self._default_fallback_index)
+        model_chain = self.extract_model_chain(target_module, fallback_idx)
+
         if 'model' in kwargs:
             model_name = kwargs['model']
-            if model_name.lower().startswith("ollama/"):
-                kwargs['model'] = model_name.split("/", 1)[1]
-        return self.model_instance.model_response(module, uploaded_file, **kwargs)
+            stripped_name = self.strip_routing_prefix(model_name)
+            provider = self._build_provider(model_name, target_module)
+            call_kwargs = {**kwargs, 'model': stripped_name}
+            return provider.model_response(target_module, uploaded_file, **call_kwargs)
 
-    def upload_media(self, file_bytes: bytes, mime_type: str) -> Any:
-        return self.model_instance.upload_media(file_bytes, mime_type)
+        last_exception = None
+        module_name = type(target_module).__name__
 
-    def embed_content(self, input_content: Union[str, List[str]], **kwargs) -> Union[List[float], List[List[float]]]:
-        return self.model_instance.embed_content(input_content, **kwargs)
+        for model_name in model_chain:
+            start_time = time.time()
+            try:
+                provider = self._build_provider(model_name, target_module)
+                call_kwargs = {**kwargs, 'model': self.strip_routing_prefix(model_name)}
+                return provider.model_response(target_module, uploaded_file, **call_kwargs)
+            except Exception as e:
+                duration = time.time() - start_time
+                last_exception = e
+                cost_tracker.record_failed_attempt(module_name, self.strip_routing_prefix(model_name), duration, error=e)
+                logger.warning(f"Model '{model_name}' failed after {duration:.2f}s; trying next fallback. Error: {e}")
+                continue
 
-    def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
-        return self.model_instance.evaluate_response(input_prompt, generated_output, rubric)
+        raise RuntimeError(f"Failed to get response after trying all models in chain {model_chain}. Last error: {last_exception}") from last_exception
 
-    def to_langchain_model(self, **kwargs) -> Any:
-        """
-        Returns a LangChain-compatible model instance.
-        """
-        provider = self.get_provider_by_model_name(self.model_instance.model_name)
-        model_name = self.model_instance.model_name
-        
-        # Common generation parameters
-        gen_params = {
-            "temperature": self.model_instance.temperature,
-            "max_tokens": self.model_instance.max_tokens,
-            "top_p": self.model_instance.top_p,
-            **kwargs
-        }
+    def _get_primary_provider(self, module: Optional[BaseModule] = None) -> LLMProvider:
+        target_module = module if module is not None else self._default_module
+        if target_module is None:
+            raise ValueError("A prompt module must be provided.")
+        chain = self.extract_model_chain(target_module, self._default_fallback_index)
+        return self._build_provider(chain[0], target_module)
 
-        if provider == 'openai':
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(
-                model=model_name,
-                api_key=self.model_instance.api_key,
-                **gen_params
-            )
-        elif provider == 'google':
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            return ChatGoogleGenerativeAI(
-                model=model_name,
-                google_api_key=self.model_instance.api_key,
-                **gen_params
-            )
-        elif provider == 'ollama':
-            from langchain_ollama import ChatOllama
-            # Resolve host from env or default
-            ollama_url = get_local_secret("OLLAMA_URL", raise_error=False) or "http://localhost:11434"
-            return ChatOllama(
-                model=model_name,
-                base_url=ollama_url,
-                **gen_params
-            )
-        elif provider == 'perplexity':
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(
-                model=model_name,
-                openai_api_key=self.model_instance.api_key,
-                openai_api_base="https://api.perplexity.ai",
-                **gen_params
-            )
-        else:
-            raise ValueError(f"LangChain integration not yet implemented for provider: {provider}")
+    def upload_media(self, file_bytes: bytes, mime_type: str, module: Optional[BaseModule] = None) -> Any:
+        return self._get_primary_provider(module).upload_media(file_bytes, mime_type)
+
+    def embed_content(self, input_content: Union[str, List[str]], module: Optional[BaseModule] = None, **kwargs) -> Union[List[float], List[List[float]]]:
+        return self._get_primary_provider(module).embed_content(input_content, **kwargs)
+
+    def evaluate_response(self, input_prompt: str, generated_output: str, rubric: Optional[str] = None, module: Optional[BaseModule] = None) -> JudgeResult:
+        return self._get_primary_provider(module).evaluate_response(input_prompt, generated_output, rubric)
+
+
+# Singleton instance
+router = ModelRouter()
+
+
+def router_response(module: BaseModule, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
+    """Execute a prompt module using the singleton router."""
+    return router.model_response(module, uploaded_file=uploaded_file, **kwargs)
+
+
+def model_response(module: BaseModule, uploaded_file: Optional[Any] = None, **kwargs) -> Any:
+    """Alias for router_response."""
+    return router.model_response(module, uploaded_file=uploaded_file, **kwargs)
+
+
+def upload_media(module: BaseModule, file_bytes: bytes, mime_type: str) -> Any:
+    """Upload media using the provider defined by the module."""
+    return router.upload_media(file_bytes, mime_type, module=module)
+
+
+def embed_content(module: BaseModule, input_content: Union[str, List[str]], **kwargs) -> Union[List[float], List[List[float]]]:
+    """Embed content using the provider defined by the module."""
+    return router.embed_content(input_content, module=module, **kwargs)
+
+
+def evaluate_response(module: BaseModule, input_prompt: str, generated_output: str, rubric: Optional[str] = None) -> JudgeResult:
+    """Evaluate response using the provider defined by the module."""
+    return router.evaluate_response(input_prompt, generated_output, rubric=rubric, module=module)
+

@@ -2,8 +2,9 @@
 # Environment & Configuration
 # ============================================
 
-# env_ops
+# env_ops & s3_ops
 boto3==1.42.45
+
 python-dotenv==1.2.2
 
 
@@ -20,20 +21,12 @@ pydantic==2.12.5
 # ============================================
 
 google-genai==1.62.0
-#google-auth==2.35.0
+google-auth==2.56.2
 openai>=1.58.1,<2.0.0
+anthropic==0.120.2
 ollama==0.6.2
 perplexityai==0.30.1
 httpx==0.28.1
-
-# LangChain & LangGraph
-langchain>=0.3,<0.4
-langchain-core==0.3.49
-langchain-community==0.3.19
-langgraph==0.3.5
-langchain-openai>=0.3,<0.4
-langchain-google-genai==2.0.10
-langchain-ollama==0.2.3
 
 
 # ============================================
@@ -54,7 +47,7 @@ markdownify==1.2.2
 openpyxl==3.1.5
 pdfminer.six==20251230
 python-pptx==1.0.2
-youtube-transcript-api==1.0.3
+youtube-transcript-api>=1.2.3
 pdfplumber==0.11.9
 azure-ai-documentintelligence==1.0.2
 azure-identity==1.25.3
@@ -62,7 +55,7 @@ pydub==0.25.1
 speechrecognition==3.16.1
 xlrd==2.0.2
 xlsxwriter==3.2.9
-pandas==3.0.3
+pandas==2.3.3
 lxml==6.1.0
 pillow==12.2.0
 pypdfium2==5.8.0
@@ -81,5 +74,24 @@ olefile==0.47
 # ============================================
 
 # video processing
-opencv-python-headless==4.9.0.80
-numpy==1.26.4
+opencv-python-headless==4.14.0.94
+
+# numpy 2.x is mandatory: magika (pulled in by markitdown) requires
+# numpy>=2.1.0 on Python 3.13+, and cv2 built for numpy 1.x fails to import
+# against it.
+numpy==2.3.5
+
+
+# ============================================
+# Database Connectors (Optional)
+# ============================================
+
+psycopg2-binary>=2.9.9
+pymysql>=1.1.0
+
+
+# ============================================
+# Testing
+# ============================================
+
+pytest>=9.0.0

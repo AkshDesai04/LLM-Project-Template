@@ -1,0 +1,154 @@
+"""
+PostgreSQL Database Connector Implementation.
+"""
+
+import contextlib
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+try:
+    import psycopg2
+    import psycopg2.extras
+    PSYCOPG2_AVAILABLE = True
+except ImportError:
+    PSYCOPG2_AVAILABLE = False
+    psycopg2 = None
+
+from utils.db.base import BaseDatabaseConnector
+from utils.db.postgres.vector_handler import (
+    create_postgres_vector_table,
+    insert_postgres_vector,
+    insert_postgres_vectors,
+    search_postgres_vectors,
+    delete_postgres_vector,
+)
+from utils.env import get_database_url, get_secret
+from utils.logging import get_logger
+
+logger = get_logger("PostgreSQLConnector")
+
+
+class PostgreSQLConnector(BaseDatabaseConnector):
+    """Connector for PostgreSQL relational databases using a single connection URL."""
+
+    def __init__(self, connection_string: Optional[str] = None):
+        self.connection_string = (
+            connection_string
+            or get_secret("POSTGRES_URL", raise_error=False)
+            or get_database_url(raise_error=False)
+        )
+        self._connection = None
+        self._in_transaction: bool = False
+
+    def connect(self):
+        if not PSYCOPG2_AVAILABLE:
+            message = "psycopg2 is not installed. Please install 'psycopg2-binary' to use PostgreSQLConnector."
+            logger.error(message)
+            raise ImportError(message)
+
+        if self._connection is None or self._connection.closed != 0:
+            if not self.connection_string:
+                raise ValueError("No PostgreSQL connection URL provided (set POSTGRES_URL or DATABASE_URL).")
+            logger.info("Connecting to PostgreSQL database via connection URL...")
+            self._connection = psycopg2.connect(self.connection_string)
+            logger.info("Successfully connected to PostgreSQL database.")
+        return self._connection
+
+    def close(self) -> None:
+        if self._connection is not None and self._connection.closed == 0:
+            logger.info("Closing PostgreSQL connection...")
+            self._connection.close()
+            self._connection = None
+            logger.info("PostgreSQL connection closed.")
+
+    def is_connected(self) -> bool:
+        if not PSYCOPG2_AVAILABLE or self._connection is None or self._connection.closed != 0:
+            return False
+        try:
+            with self._connection.cursor() as cursor:
+                cursor.execute("SELECT 1;")
+            return True
+        except Exception:
+            return False
+
+    def execute_query(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+        conn = self.connect()
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                cursor.execute(query, params or ())
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"PostgreSQL query execution failed: {e}")
+            raise
+
+    def execute_non_query(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> int:
+        conn = self.connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(query, params or ())
+                rowcount = cursor.rowcount
+            if not self._in_transaction:
+                conn.commit()
+            return rowcount
+        except Exception as e:
+            if not self._in_transaction:
+                conn.rollback()
+            logger.error(f"PostgreSQL non-query execution failed: {e}")
+            raise
+
+    def execute_many(self, query: str, params_list: List[Union[Tuple[Any, ...], Dict[str, Any]]]) -> int:
+        conn = self.connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.executemany(query, params_list)
+                rowcount = cursor.rowcount
+            if not self._in_transaction:
+                conn.commit()
+            return rowcount
+        except Exception as e:
+            if not self._in_transaction:
+                conn.rollback()
+            logger.error(f"PostgreSQL executemany failed: {e}")
+            raise
+
+    def fetch_one(self, query: str, params: Optional[Union[Tuple[Any, ...], Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+        conn = self.connect()
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                cursor.execute(query, params or ())
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"PostgreSQL fetch_one failed: {e}")
+            raise
+
+    @contextlib.contextmanager
+    def transaction(self):
+        conn = self.connect()
+        was_in_transaction = self._in_transaction
+        self._in_transaction = True
+        try:
+            yield conn
+            if not was_in_transaction:
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"PostgreSQL transaction failed and rolled back: {e}")
+            raise
+        finally:
+            self._in_transaction = was_in_transaction
+
+    # Vector operations
+    def create_vector_table(self, table_name: str, vector_dim: int, distance_metric: str = "cosine") -> None:
+        create_postgres_vector_table(self, table_name, vector_dim, distance_metric)
+
+    def insert_vector(self, table_name: str, vector_id: str, vector: List[float], metadata: Optional[Dict[str, Any]] = None) -> int:
+        return insert_postgres_vector(self, table_name, vector_id, vector, metadata)
+
+    def insert_vectors(self, table_name: str, records: List[Dict[str, Any]]) -> int:
+        return insert_postgres_vectors(self, table_name, records)
+
+    def vector_search(self, table_name: str, query_vector: List[float], top_k: int = 10, min_score: Optional[float] = None, distance_metric: str = "cosine") -> List[Dict[str, Any]]:
+        return search_postgres_vectors(self, table_name, query_vector, top_k=top_k, min_score=min_score, distance_metric=distance_metric)
+
+    def delete_vector(self, table_name: str, vector_id: str) -> int:
+        return delete_postgres_vector(self, table_name, vector_id)
